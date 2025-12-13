@@ -1,0 +1,116 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tsgen"
+version = "0.1.0"
+description = "Synthetic Financial Time Series Generation using Diffusion Models"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "tsgen Contributors"}
+]
+keywords = [
+    "finance",
+    "time-series",
+    "diffusion-models",
+    "synthetic-data",
+    "deep-learning"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Office/Business :: Financial",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+# Core dependencies
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.20.0,<2.0.0",
+    "pandas>=1.5.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+    "statsmodels>=0.13.0",
+    "matplotlib>=3.5.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.0.0",
+    "mlflow>=2.0.0",
+    "pyarrow>=10.0.0",
+    "joblib>=1.0.0",
+    # Note: findata dependency must be installed separately
+    # cd ../findata && pip install -e .
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+    "pre-commit>=2.20.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/tsgen"
+Documentation = "https://github.com/yourusername/tsgen#readme"
+Repository = "https://github.com/yourusername/tsgen"
+Issues = "https://github.com/yourusername/tsgen/issues"
+
+[project.scripts]
+# Main training and evaluation command
+tsgen = "tsgen.cli.main:main"
+
+# Experiment management
+tsgen-experiments = "tsgen.cli.experiments:main"
+
+# Backtest command
+tsgen-backtest = "tsgen.experiments.backtest:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tsgen = ["*.yaml", "*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true

@@ -1,0 +1,2 @@
+# This file ensures the experiments/ directory is tracked by git
+# All experiment content is gitignored, but the folder structure is preserved
