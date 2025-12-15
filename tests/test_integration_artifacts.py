@@ -34,6 +34,13 @@ def minimal_config():
         'in_channels': 2,
         'channels': 32,
         'tracker': 'file',
+        'DataPipeline': [
+            {'load_prices': {'column': 'adj_close'}},
+            {'clean_data': {'strategy': 'ffill_drop'}},
+            {'process_prices': {'fit': True}},
+            {'create_windows': {'sequence_length': 64}},
+            {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
+        ]
     }
 
 

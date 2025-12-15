@@ -2,12 +2,14 @@
 GEMINI.md
 CLAUDE.md
 .claude/
+.gemini/
 
 # Project-specific directories
 logs/
 notes/
 reports/
 htmlcov/
+plans/
 
 # Experiments - keep folder structure but ignore all content
 experiments/*

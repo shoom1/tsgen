@@ -3,16 +3,15 @@ Main training module with Trainer Registry Pattern.
 
 Uses Strategy + Registry + Factory patterns to dispatch to appropriate
 trainer based on model type.
+
+Data pipeline is configured via YAML using the DataPipeline key.
 """
 
 import torch
 import tempfile
 import os
 from tsgen.models.factory import create_model
-from tsgen.data.pipeline import (
-    load_prices, clean_data, split_temporal,
-    process_prices, create_windows, create_dataloader
-)
+from tsgen.data.pipeline_builder import DataPipeline
 from tsgen.data.processor import LogReturnProcessor
 from tsgen.tracking.base import ExperimentTracker
 from tsgen.training.registry import TrainerRegistry
@@ -31,6 +30,8 @@ def train_model(config, tracker: ExperimentTracker):
     based on model type. Supports diffusion models (UNet, Transformer),
     VAE models (TimeVAE), and baseline models (GBM, Bootstrap, etc.).
 
+    Data pipeline is configured via YAML using config['DataPipeline'].
+
     Args:
         config: Configuration dictionary containing hyperparameters
         tracker: Experiment tracker for logging metrics and artifacts
@@ -44,43 +45,25 @@ def train_model(config, tracker: ExperimentTracker):
     # Log parameters
     tracker.log_params(config)
 
-    # Data Pipeline
-    # 1. Load prices
-    df = load_prices(
-        config['tickers'],
-        config['start_date'],
-        config['end_date'],
-        column=config.get('column', 'adj_close'),
-        db_path=config.get('db_path')
-    )
-
-    # 2. Clean data
-    df_clean = clean_data(df, strategy='ffill_drop')
-
-    # 3. Split if requested (temporal split for proper out-of-sample evaluation)
-    train_test_split = config.get('train_test_split')
-    if train_test_split:
-        train_df, _ = split_temporal(df_clean, train_ratio=train_test_split)
-    else:
-        train_df = df_clean
-
-    # 4. Process (fit processor on training data only)
+    # Create processor
     processor = LogReturnProcessor()
-    train_scaled = process_prices(train_df, processor, fit=True)
 
-    # 5. Create windows
-    train_sequences = create_windows(train_scaled, sequence_length=config['sequence_length'])
+    # Build and execute YAML-configured data pipeline
+    print("Using YAML-configured data pipeline")
+    pipeline = DataPipeline.from_config(config)
 
-    # 6. Create DataLoader
-    dataloader = create_dataloader(
-        train_sequences,
-        batch_size=config['batch_size'],
-        shuffle=True
+    # Execute pipeline with runtime parameters
+    dataloader = pipeline.execute(
+        tickers=config['tickers'],
+        start_date=config['start_date'],
+        end_date=config['end_date'],
+        column=config.get('column', 'adj_close'),
+        db_path=config.get('db_path'),
+        processor=processor
     )
 
-    # Store feature count in config for trainers that need it
-    ticker_names = df_clean.columns.tolist()
-    config['num_features'] = len(ticker_names)
+    # Get feature count from config
+    config['num_features'] = len(config['tickers'])
 
     # Create model
     model = create_model(config)

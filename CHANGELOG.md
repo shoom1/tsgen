@@ -5,7 +5,153 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2024-12-12
+## [0.3.1] - 2025-12-13
+
+### Changed - Breaking
+
+- **Pipeline Configuration Format**: Simplified and renamed
+  - Config key renamed: `pipeline.steps` → `DataPipeline`
+  - Direct list format instead of nested structure
+  - **Old format (no longer supported)**:
+    ```yaml
+    pipeline:
+      steps:
+        - load_prices: {}
+        - clean_data: {}
+    ```
+  - **New format (required)**:
+    ```yaml
+    DataPipeline:
+      - load_prices: {}
+      - clean_data: {}
+    ```
+
+- **Removed Legacy Manual Pipeline**:
+  - All configs must now include `DataPipeline` section
+  - No backward compatibility with configs lacking pipeline configuration
+  - Eliminates code duplication from hardcoded pipeline logic
+
+### Added
+
+- **YAML-Configurable Data Pipeline**: Functional composition pattern for data preprocessing
+  - `DataPipeline` class: Compose pipeline steps from YAML configuration
+  - `PipelineStep` wrapper: Adds metadata and validation to pipeline functions
+  - `PIPELINE_REGISTRY`: Maps step names to functions with type/parameter specs
+  - Inspired by `torchvision.transforms.Compose` but for data pipelines
+
+- **Pipeline Steps** with metadata and type checking:
+  - `load_prices`: Load data from findata database
+  - `clean_data`: Handle NaN values with configurable strategies
+  - `split_temporal`: Chronological train/test splitting
+  - `process_prices`: Convert prices → log-returns → standardized
+  - `create_windows`: Sliding window generation
+  - `create_dataloader`: PyTorch DataLoader creation
+
+- **Type Safety**:
+  - Pipeline validates step output/input type compatibility at build time
+  - Catches mismatched types (DataFrame → ndarray → DataLoader) before execution
+  - Clear error messages with step context
+
+- **Parameter Validation**:
+  - Required vs optional parameter checking
+  - Runtime parameter override of config parameters
+  - Function signature inspection for automatic parameter filtering
+
+- **Documentation**:
+  - `notes/PIPELINE_GUIDE.md`: Comprehensive pipeline configuration guide
+  - Example configs: `configs/example_pipeline_*.yaml`
+  - 37 new tests covering pipeline functionality
+
+### Changed
+
+- **Unified Baseline Model**: Merged `GBMGenerativeModel` and `MultivariateLogNormalModel` into single `MultivariateGBM` class
+  - New `full_covariance` parameter (default=`True`) controls correlation modeling
+  - `full_covariance=True`: Captures cross-asset correlations via Cholesky decomposition (previous `multivariate_lognormal` behavior)
+  - `full_covariance=False`: Independent per-feature sampling (previous `gbm` behavior)
+  - Backward compatible: Old model_type strings still work (`'gbm'`, `'multivariate_lognormal'`)
+  - New recommended model_type: `'multivariate_gbm'` with configurable `full_covariance`
+
+- **train.py**: Simplified to use only DataPipeline
+  - Removed legacy manual pipeline code
+  - Single, unified data pipeline approach
+  - Cleaner, more maintainable codebase
+
+- **evaluate.py**: Simplified evaluation pipeline
+  - Direct use of processor.transform() and create_windows()
+  - Maintains `df_real` for plotting compatibility
+
+### Improved
+
+- **Code Quality**:
+  - Eliminated pipeline code duplication in train.py and evaluate.py
+  - Reduced repetitive parameter extraction from config
+  - Centralized pipeline logic in reusable classes
+  - Cleaner separation of concerns
+
+- **Configurability**:
+  - Per-experiment pipeline customization via YAML
+  - Easy to add/remove/reorder pipeline steps
+  - No code changes needed for pipeline experiments
+
+- **Testability**:
+  - Individual pipeline steps remain independently testable
+  - Integration tests verify end-to-end pipeline flow
+
+### Testing
+
+- All 270+ existing tests updated and passing ✅
+- 37 pipeline tests updated:
+  - `test_pipeline_builder.py`: 29 tests (PipelineStep, DataPipeline, registry, type validation)
+  - `test_train_with_pipeline.py`: 3 tests (training with DataPipeline)
+  - `test_evaluate_with_pipeline.py`: 1 test (evaluation with DataPipeline)
+
+### Benefits
+
+1. **No Code Duplication**: Pipeline defined once in config, used everywhere
+2. **Simplified Configuration**: Direct list format, no nested structure
+3. **Type Safe**: Validates step composition at build time
+4. **Composable**: Functions remain independent, just wrapped
+5. **Extensible**: Easy to add new pipeline steps to registry
+6. **Cleaner Codebase**: Removed legacy manual pipeline code
+
+### Migration Guide
+
+**⚠️ Breaking Change**: All configs must be updated to use `DataPipeline` format.
+
+**Update your configs**:
+
+```yaml
+# Before (v0.3.0):
+pipeline:
+  steps:
+    - load_prices:
+        column: 'adj_close'
+    - clean_data:
+        strategy: 'ffill_drop'
+    - create_windows:
+        sequence_length: 64
+
+# After (v0.3.1):
+DataPipeline:
+  - load_prices:
+      column: 'adj_close'
+  - clean_data:
+      strategy: 'ffill_drop'
+  - create_windows:
+      sequence_length: 64
+```
+
+**Changes required**:
+1. Rename `pipeline:` to `DataPipeline:`
+2. Remove `steps:` level - list steps directly under `DataPipeline`
+
+**See Also:**
+- `notes/PIPELINE_GUIDE.md` - Complete pipeline configuration guide
+- `configs/example_pipeline_*.yaml` - Example configurations
+
+---
+
+## [0.3.0] - 2025-12-12
 
 ### Changed - Breaking
 
@@ -103,7 +249,7 @@ model_path = tracker.get_artifact_path('model_final.pt', artifact_type='model')
 4. **MLflow Ready**: Production experiment tracking with cloud storage support
 5. **Backward Compatible**: Old configs work with deprecation warnings
 
-## [0.2.0] - 2024-12-12
+## [0.2.0] - 2025-12-12
 
 ### Changed - Breaking
 
@@ -166,7 +312,7 @@ No changes needed - `train_model()` API is fully backward compatible.
 - Test coverage maintained at same level
 - No regression in training functionality
 
-## [0.1.0] - 2024-12-12
+## [0.1.0] - 2025-12-12
 
 ### Added
 

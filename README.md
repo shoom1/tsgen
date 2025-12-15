@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A research framework for generating realistic synthetic financial time series using Denoising Diffusion Probabilistic Models (DDPM). The project benchmarks deep learning architectures (UNet, Transformer) against classical baselines (GBM, Bootstrap, Multivariate LogNormal) for capturing "Stylized Facts" of financial returns.
+A research framework for generating realistic synthetic financial time series using Denoising Diffusion Probabilistic Models (DDPM). The project benchmarks deep learning architectures (UNet, Transformer) against classical baselines (Multivariate GBM, Bootstrap) for capturing "Stylized Facts" of financial returns.
 
 ## Purpose
 
@@ -293,35 +293,8 @@ flake8 src/ tests/
   - Manages the time series database
   - Must be installed before using tsgen
   - tsgen has READ-ONLY access to the database
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@software{tsgen2024,
-  title={tsgen: Synthetic Financial Time Series Generation},
-  author={tsgen Contributors},
-  year={2024},
-  url={https://github.com/yourusername/tsgen}
-}
-```
-
+  
 ## License
 
 MIT License - See LICENSE file for details
 
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
-
-## Support
-
-For issues, questions, or feature requests:
-- Open an issue on [GitHub Issues](https://github.com/yourusername/tsgen/issues)
-- Check the [Wiki](https://github.com/yourusername/tsgen/wiki) for detailed documentation
-- Review experiment configuration examples in the repository

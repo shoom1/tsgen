@@ -1,14 +1,14 @@
 """
-Tests for MultivariateLogNormalModel.
+Tests for MultivariateGBM model with full covariance.
 
-This model improves upon GBM by capturing cross-asset correlations
-via a full covariance matrix and Cholesky decomposition.
+This model captures cross-asset correlations via a full covariance matrix
+and Cholesky decomposition when full_covariance=True (default).
 """
 
 import pytest
 import torch
 import numpy as np
-from tsgen.models.baselines import MultivariateLogNormalModel
+from tsgen.models.baselines import MultivariateGBM
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
@@ -30,10 +30,11 @@ def synthetic_dataloader():
 
 
 def test_multivariate_initialization():
-    """Test MultivariateLogNormal model can be initialized."""
-    model = MultivariateLogNormalModel(features=3)
+    """Test MultivariateGBM model can be initialized with full covariance."""
+    model = MultivariateGBM(features=3)  # full_covariance=True by default
     assert model is not None
     assert model.features == 3
+    assert model.full_covariance == True
 
     # Check buffers are initialized
     assert model.mean.shape == (3,)
@@ -44,8 +45,8 @@ def test_multivariate_initialization():
 
 
 def test_multivariate_fit(synthetic_dataloader):
-    """Test MultivariateLogNormal model fitting."""
-    model = MultivariateLogNormalModel(features=3)
+    """Test MultivariateGBM model fitting with full covariance."""
+    model = MultivariateGBM(features=3)
 
     # Fit model
     model.fit(synthetic_dataloader)
@@ -71,7 +72,7 @@ def test_multivariate_fit(synthetic_dataloader):
 
 def test_multivariate_sample(synthetic_dataloader):
     """Test MultivariateLogNormal model sampling."""
-    model = MultivariateLogNormalModel(features=3)
+    model = MultivariateGBM(features=3)
     model.fit(synthetic_dataloader)
 
     # Generate samples
@@ -88,7 +89,7 @@ def test_multivariate_sample(synthetic_dataloader):
 
 def test_multivariate_correlation_structure():
     """Test that multivariate model captures correlation structure."""
-    model = MultivariateLogNormalModel(features=2)
+    model = MultivariateGBM(features=2)
 
     # Create correlated synthetic data
     # Asset 1 and Asset 2 with correlation 0.7
@@ -135,9 +136,7 @@ def test_multivariate_correlation_structure():
 
 
 def test_multivariate_vs_gbm_correlation():
-    """Test that multivariate model preserves correlation while GBM doesn't."""
-    from tsgen.models.baselines import GBMGenerativeModel
-
+    """Test that full covariance mode preserves correlation while independent mode doesn't."""
     # Create correlated data
     torch.manual_seed(42)
     n_samples = 500
@@ -154,33 +153,33 @@ def test_multivariate_vs_gbm_correlation():
     dataset = TensorDataset(X)
     dataloader = DataLoader(dataset, batch_size=32)
 
-    # Fit both models
-    multivariate = MultivariateLogNormalModel(features=2)
+    # Fit both modes of MultivariateGBM
+    multivariate = MultivariateGBM(features=2, full_covariance=True)
     multivariate.fit(dataloader)
 
-    gbm = GBMGenerativeModel(features=2)
-    gbm.fit(dataloader)
+    independent = MultivariateGBM(features=2, full_covariance=False)
+    independent.fit(dataloader)
 
     # Generate samples
     mv_samples = multivariate.sample(5000, 100).reshape(-1, 2).numpy()
-    gbm_samples = gbm.sample(5000, 100).reshape(-1, 2).numpy()
+    indep_samples = independent.sample(5000, 100).reshape(-1, 2).numpy()
 
     # Compute correlations
     mv_corr = np.corrcoef(mv_samples, rowvar=False)[0, 1]
-    gbm_corr = np.corrcoef(gbm_samples, rowvar=False)[0, 1]
+    indep_corr = np.corrcoef(indep_samples, rowvar=False)[0, 1]
 
-    # Multivariate should preserve correlation (~0.8)
+    # Full covariance mode should preserve correlation (~0.8)
     assert abs(mv_corr - 0.8) < 0.1, \
-        f"Multivariate correlation should be ~0.8, got {mv_corr:.3f}"
+        f"Full covariance correlation should be ~0.8, got {mv_corr:.3f}"
 
-    # GBM should have near-zero correlation (samples independently)
-    assert abs(gbm_corr) < 0.1, \
-        f"GBM correlation should be ~0, got {gbm_corr:.3f}"
+    # Independent mode should have near-zero correlation (samples independently)
+    assert abs(indep_corr) < 0.1, \
+        f"Independent mode correlation should be ~0, got {indep_corr:.3f}"
 
 
 def test_multivariate_reproducibility():
-    """Test MultivariateLogNormal sampling is reproducible with same seed."""
-    model = MultivariateLogNormalModel(features=3)
+    """Test MultivariateGBM sampling is reproducible with same seed."""
+    model = MultivariateGBM(features=3)
 
     # Set parameters manually
     model.mean = torch.tensor([0.001, 0.002, 0.003])
@@ -205,7 +204,7 @@ def test_multivariate_save_load():
     import os
 
     # Create model
-    model = MultivariateLogNormalModel(features=2)
+    model = MultivariateGBM(features=2)
     model.mean = torch.tensor([0.01, 0.02])
     model.cholesky_L = torch.tensor([[1.0, 0.0],
                                      [0.7, 0.7]])
@@ -238,7 +237,7 @@ def test_multivariate_save_load():
 
 def test_multivariate_forward():
     """Test forward method (should return zeros for baselines)."""
-    model = MultivariateLogNormalModel(features=2)
+    model = MultivariateGBM(features=2)
 
     x = torch.randn(4, 64, 2)
     t = torch.randint(0, 500, (4,))
@@ -252,7 +251,7 @@ def test_multivariate_forward():
 
 def test_multivariate_cholesky_regularization():
     """Test that regularization prevents singular matrix issues."""
-    model = MultivariateLogNormalModel(features=2)
+    model = MultivariateGBM(features=2)
 
     # Create nearly singular data (all same value)
     X = torch.ones(100, 64, 2) * 0.5
@@ -273,7 +272,7 @@ def test_multivariate_cholesky_regularization():
 
 def test_multivariate_cov_to_corr():
     """Test covariance to correlation conversion."""
-    model = MultivariateLogNormalModel(features=2)
+    model = MultivariateGBM(features=2)
 
     # Create known covariance matrix
     cov = torch.tensor([[4.0, 2.0],

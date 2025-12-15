@@ -49,6 +49,13 @@ def minimal_config():
         'model_type': 'unet',
         'base_channels': 32,
         'tracker': 'noop',
+        'DataPipeline': [
+            {'load_prices': {'column': 'adj_close'}},
+            {'clean_data': {'strategy': 'ffill_drop'}},
+            {'process_prices': {'fit': True}},
+            {'create_windows': {'sequence_length': 64}},
+            {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
+        ]
     }
 
 

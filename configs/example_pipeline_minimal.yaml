@@ -1,0 +1,28 @@
+# Minimal Pipeline Configuration Example
+# Demonstrates the simplest possible pipeline setup
+
+experiment_name: 'minimal_pipeline_example'
+model_type: 'unet'
+
+# Data
+tickers: ['AAPL', 'MSFT', 'GOOGL']
+start_date: '2023-01-01'
+end_date: '2023-12-31'
+
+# Training
+sequence_length: 64
+batch_size: 16
+epochs: 10
+timesteps: 100
+learning_rate: 1e-3
+base_channels: 32
+
+# Minimal pipeline - uses all defaults
+DataPipeline:
+  - load_prices: {}      # All params from runtime (tickers, dates)
+  - clean_data: {}       # Default strategy='ffill_drop'
+  - process_prices: {}   # Uses processor from runtime, fit from runtime
+  - create_windows: {}   # Uses sequence_length from config
+  - create_dataloader: {} # Uses batch_size from config
+
+tracker: 'console'

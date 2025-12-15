@@ -1,5 +1,5 @@
 """
-Tests for baseline generative models (GBM and Bootstrap).
+Tests for baseline generative models (MultivariateGBM and Bootstrap).
 
 These models don't use neural networks but provide important baselines
 for comparison with diffusion models.
@@ -8,7 +8,7 @@ for comparison with diffusion models.
 import pytest
 import torch
 import numpy as np
-from tsgen.models.baselines import GBMGenerativeModel, BootstrapGenerativeModel
+from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
@@ -29,16 +29,23 @@ def synthetic_dataloader():
     return loader
 
 
-def test_gbm_initialization():
-    """Test GBM model can be initialized."""
-    model = GBMGenerativeModel(features=2)
-    assert model is not None
-    assert model.features == 2
+def test_multivariate_gbm_initialization():
+    """Test MultivariateGBM model can be initialized."""
+    # Test with full covariance (default)
+    model_full = MultivariateGBM(features=2)
+    assert model_full is not None
+    assert model_full.features == 2
+    assert model_full.full_covariance == True
+
+    # Test without covariance (independent sampling)
+    model_indep = MultivariateGBM(features=2, full_covariance=False)
+    assert model_indep.features == 2
+    assert model_indep.full_covariance == False
 
 
-def test_gbm_fit(synthetic_dataloader):
-    """Test GBM model fitting."""
-    model = GBMGenerativeModel(features=2)
+def test_multivariate_gbm_fit_independent(synthetic_dataloader):
+    """Test MultivariateGBM model fitting (independent mode)."""
+    model = MultivariateGBM(features=2, full_covariance=False)
 
     # Fit model
     model.fit(synthetic_dataloader)
@@ -55,9 +62,9 @@ def test_gbm_fit(synthetic_dataloader):
     assert torch.all(model.sigma > 0), "Sigma should be positive"
 
 
-def test_gbm_sample(synthetic_dataloader):
-    """Test GBM model sampling."""
-    model = GBMGenerativeModel(features=2)
+def test_multivariate_gbm_sample_independent(synthetic_dataloader):
+    """Test MultivariateGBM model sampling (independent mode)."""
+    model = MultivariateGBM(features=2, full_covariance=False)
     model.fit(synthetic_dataloader)
 
     # Generate samples
@@ -72,9 +79,9 @@ def test_gbm_sample(synthetic_dataloader):
     assert torch.all(torch.isfinite(samples))
 
 
-def test_gbm_reproducibility():
-    """Test GBM sampling is reproducible with same seed."""
-    model = GBMGenerativeModel(features=2)
+def test_multivariate_gbm_reproducibility_independent():
+    """Test MultivariateGBM sampling is reproducible with same seed (independent mode)."""
+    model = MultivariateGBM(features=2, full_covariance=False)
 
     # Set parameters manually
     model.mu = torch.tensor([0.001, 0.002])
@@ -172,10 +179,10 @@ def test_bootstrap_reproducibility():
     assert torch.allclose(samples1, samples2)
 
 
-def test_gbm_vs_bootstrap_different_outputs(synthetic_dataloader):
-    """Test that GBM and Bootstrap produce different samples."""
+def test_multivariate_gbm_vs_bootstrap_different_outputs(synthetic_dataloader):
+    """Test that MultivariateGBM and Bootstrap produce different samples."""
     # Create and fit both models
-    gbm = GBMGenerativeModel(features=2)
+    gbm = MultivariateGBM(features=2, full_covariance=False)
     gbm.fit(synthetic_dataloader)
 
     bootstrap = BootstrapGenerativeModel(features=2, sequence_length=64)
@@ -197,8 +204,8 @@ def test_baseline_models_save_load():
     import tempfile
     import os
 
-    # Create GBM model
-    gbm = GBMGenerativeModel(features=2)
+    # Create MultivariateGBM model (independent mode)
+    gbm = MultivariateGBM(features=2, full_covariance=False)
     gbm.mu = torch.tensor([0.001, 0.002])
     gbm.sigma = torch.tensor([0.02, 0.03])
 

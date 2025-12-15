@@ -137,8 +137,9 @@ def evaluate_model(config, tracker: ExperimentTracker):
             gen_seqs = diff_utils.sample(model, image_size=(config['sequence_length'], features), batch_size=num_samples, y=y_sampling)
         
     gen_seqs_np = gen_seqs.cpu().numpy() # (N, Seq, Feat) - Scaled returns
-    
-    # 2. Real Data Preparation - Use pipeline
+
+    # 2. Real Data Preparation
+    # Load raw data for plotting
     df = load_prices(
         config['tickers'],
         config['start_date'],
@@ -146,13 +147,12 @@ def evaluate_model(config, tracker: ExperimentTracker):
         column=config.get('column', 'adj_close'),
         db_path=config.get('db_path')
     )
-
     df_real = clean_data(df, strategy='ffill_drop')
 
-    # Use processor to transform
+    # Use fitted processor to transform (don't refit)
     real_data_scaled = processor.transform(df_real)
 
-    # Create windows using pipeline
+    # Create windows
     real_seqs_scaled = create_windows(real_data_scaled, sequence_length=config['sequence_length'])
     
     # Ensure we compare same amount of data if possible

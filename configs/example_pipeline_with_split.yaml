@@ -1,0 +1,49 @@
+# Advanced Pipeline Configuration Example
+# Demonstrates pipeline with train/test split
+
+experiment_name: 'pipeline_with_split'
+model_type: 'unet'
+
+# Data
+tickers: ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA']
+start_date: '2020-01-01'
+end_date: '2024-12-31'
+
+# Training
+sequence_length: 64
+batch_size: 32
+epochs: 50
+timesteps: 500
+learning_rate: 1e-3
+base_channels: 64
+
+# Advanced pipeline with temporal split
+# This trains only on 80% of data (proper out-of-sample validation)
+DataPipeline:
+  # Load full dataset
+  - load_prices:
+      column: 'adj_close'
+
+  # Clean before splitting
+  - clean_data:
+      strategy: 'ffill_drop'
+
+  # Split into train/test (80/20)
+  # Training will use only the training portion
+  - split_temporal:
+      train_ratio: 0.8
+
+  # Process and window the training data
+  - process_prices:
+      fit: true  # Fit processor on training data only
+
+  - create_windows:
+      sequence_length: 64
+      stride: 1
+
+  - create_dataloader:
+      batch_size: 32
+      shuffle: true
+
+tracker: 'file'
+experiment_dir: 'experiments/pipeline_split_example'

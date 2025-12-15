@@ -1,6 +1,6 @@
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
-from tsgen.models.baselines import GBMGenerativeModel, BootstrapGenerativeModel, MultivariateLogNormalModel
+from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.models.timevae import TimeVAE
 
 def create_model(config):
@@ -39,14 +39,21 @@ def create_model(config):
             num_classes=config.get('num_classes', 0)
         )
     
+    elif model_type == 'multivariate_gbm':
+        # New unified model with configurable covariance
+        full_covariance = config.get('full_covariance', True)
+        return MultivariateGBM(features=features, full_covariance=full_covariance)
+
     elif model_type == 'gbm':
-        return GBMGenerativeModel(features=features)
+        # Backward compatibility: independent sampling (no correlations)
+        return MultivariateGBM(features=features, full_covariance=False)
+
+    elif model_type == 'multivariate_lognormal':
+        # Backward compatibility: full covariance (with correlations)
+        return MultivariateGBM(features=features, full_covariance=True)
 
     elif model_type == 'bootstrap':
         return BootstrapGenerativeModel(features=features, sequence_length=seq_len)
-
-    elif model_type == 'multivariate_lognormal':
-        return MultivariateLogNormalModel(features=features)
 
     elif model_type == 'timevae':
         return TimeVAE(
