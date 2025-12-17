@@ -19,7 +19,7 @@ from tsgen.models.diffusion import DiffusionUtils
 from tsgen.analysis.metrics import calculate_stylized_facts
 
 
-@TrainerRegistry.register('unet', 'transformer')
+@TrainerRegistry.register('unet', 'transformer', 'mamba')
 class DiffusionTrainer(BaseTrainer):
     """
     Trainer for diffusion models (UNet, Transformer).
@@ -32,13 +32,20 @@ class DiffusionTrainer(BaseTrainer):
     def __init__(self, model, config, tracker, device):
         super().__init__(model, config, tracker, device)
 
+        # Resolve configuration sections
+        diffusion_conf = config.get('diffusion', config)
+        training_conf = config.get('training', config)
+
         # Diffusion utilities
-        self.diff_utils = DiffusionUtils(T=config['timesteps'], device=device)
+        # Support both 'time_steps' (new) and 'timesteps' (old)
+        timesteps = diffusion_conf.get('time_steps', diffusion_conf.get('timesteps', 1000))
+        self.diff_utils = DiffusionUtils(T=timesteps, device=device)
 
         # Optimizer and loss
+        learning_rate = training_conf.get('learning_rate', 1e-3)
         self.optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=float(config['learning_rate'])
+            lr=float(learning_rate)
         )
         self.loss_fn = nn.MSELoss()
 
@@ -69,8 +76,17 @@ class DiffusionTrainer(BaseTrainer):
         # Get feature count for validation
         features = self.config.get('num_features', len(self.config.get('tickers', [])))
 
+        # Get training configuration
+        training_conf = self.config.get('training', self.config)
+        epochs = training_conf.get('epochs', 10)
+        start_epoch = self.config.get('start_epoch', 0)
+
+        # Load checkpoint if resuming
+        if start_epoch > 0:
+            print(f"Resuming training from epoch {start_epoch}")
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            for epoch in range(self.config['epochs']):
+            for epoch in range(start_epoch, epochs):
                 pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}")
                 total_loss = 0
 
@@ -79,8 +95,10 @@ class DiffusionTrainer(BaseTrainer):
                     x_0 = self._extract_batch(batch)
 
                     # Sample timestep and add noise
+                    diffusion_conf = self.config.get('diffusion', self.config)
+                    timesteps = diffusion_conf.get('time_steps', diffusion_conf.get('timesteps', 1000))
                     t = torch.randint(
-                        0, self.config['timesteps'],
+                        0, timesteps,
                         (x_0.shape[0],), device=self.device
                     ).long()
                     noise = torch.randn_like(x_0)
@@ -121,11 +139,16 @@ class DiffusionTrainer(BaseTrainer):
                 if self.validation_interval > 0 and (epoch + 1) % self.validation_interval == 0:
                     self._run_validation(epoch, features, step_count, dataloader)
 
-                # Checkpointing
-                if (epoch + 1) % 10 == 0 or epoch == self.config['epochs'] - 1:
-                    ckpt_filename = f"model_epoch_{epoch+1}.pt"
+                # Checkpointing - save full checkpoint with optimizer state
+                if (epoch + 1) % 10 == 0 or epoch == epochs - 1:
+                    ckpt_filename = f"checkpoint_epoch_{epoch+1}.pt"
                     ckpt_path = os.path.join(tmpdir, ckpt_filename)
-                    self.save_model(ckpt_path)
+                    self.save_checkpoint(
+                        ckpt_path,
+                        epoch=epoch + 1,
+                        optimizer=self.optimizer,
+                        step_count=step_count
+                    )
                     self.tracker.log_artifact(ckpt_path, artifact_type='checkpoint')
 
         return self.model

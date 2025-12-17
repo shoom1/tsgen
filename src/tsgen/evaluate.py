@@ -67,9 +67,14 @@ def train_discriminator(real_data, fake_data, device, epochs=20):
 def evaluate_model(config, tracker: ExperimentTracker):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Evaluating...")
-    
-    features = len(config['tickers']) 
-    
+
+    # Resolve config sections
+    data_conf = config.get('data', config)
+
+    # Get tickers (may need to recover from processor later if not in config)
+    tickers = data_conf.get('tickers')
+    features = len(tickers) if tickers else None
+
     # Model Factory
     model = create_model(config).to(device)
     
@@ -106,16 +111,33 @@ def evaluate_model(config, tracker: ExperimentTracker):
         print("Model architecture may have changed. Try retraining.")
         return
 
+    # Resolve config sections (needed for downstream usage)
+    diff_conf = config.get('diffusion', config)
+
+    # Handle tickers (if missing in config, try to recover from processor)
+    if tickers is None:
+        if hasattr(processor, 'feature_names_in_'):
+            tickers = list(processor.feature_names_in_)
+        elif hasattr(processor, 'n_features_'):
+            tickers = [f"Asset_{i}" for i in range(processor.n_features_)]
+
+        # Backfill config for downstream usage
+        config['tickers'] = tickers
+        data_conf['tickers'] = tickers
+
+    features = len(tickers)
+    timesteps = diff_conf.get('time_steps', diff_conf.get('T', config.get('timesteps', 1000)))
+
     # 1. Generate Data
-    num_samples = 500
+    num_samples = config.get('evaluation', config).get('num_samples', 500)
     print(f"Generating {num_samples} synthetic samples for analysis...")
     
     # Determine sampling method
-    sampling_method = config.get('sampling_method', 'ddpm').lower()
-    ddim_steps = config.get('ddim_steps', 50)
+    sampling_method = diff_conf.get('sampling_method', config.get('sampling_method', 'ddpm')).lower()
+    ddim_steps = diff_conf.get('num_inference_steps', config.get('ddim_steps', 50))
     
     # Conditional Generation Setup (for inference)
-    num_classes = config.get('num_classes', 0)
+    num_classes = config.get('model', config).get('params', config).get('num_classes', 0)
     y_sampling = None
     if num_classes > 0:
         # For evaluation, we can generate samples for a specific class or random classes
@@ -125,27 +147,27 @@ def evaluate_model(config, tracker: ExperimentTracker):
 
     if hasattr(model, 'sample'):
         # Baseline Model Generation
-        gen_seqs = model.sample(num_samples, config['sequence_length']).to(device)
+        gen_seqs = model.sample(num_samples, data_conf.get('sequence_length', config.get('sequence_length'))).to(device)
     else:
         # Diffusion Model Generation
-        diff_utils = DiffusionUtils(T=config['timesteps'], device=device)
+        diff_utils = DiffusionUtils(T=timesteps, device=device)
         if sampling_method == 'ddim':
             print(f"Using DDIM sampling with {ddim_steps} steps.")
-            gen_seqs = diff_utils.ddim_sample(model, image_size=(config['sequence_length'], features), batch_size=num_samples, num_inference_steps=ddim_steps, y=y_sampling)
+            gen_seqs = diff_utils.ddim_sample(model, image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features), batch_size=num_samples, num_inference_steps=ddim_steps, y=y_sampling)
         else:
             print("Using DDPM sampling.")
-            gen_seqs = diff_utils.sample(model, image_size=(config['sequence_length'], features), batch_size=num_samples, y=y_sampling)
+            gen_seqs = diff_utils.sample(model, image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features), batch_size=num_samples, y=y_sampling)
         
     gen_seqs_np = gen_seqs.cpu().numpy() # (N, Seq, Feat) - Scaled returns
 
     # 2. Real Data Preparation
     # Load raw data for plotting
     df = load_prices(
-        config['tickers'],
-        config['start_date'],
-        config['end_date'],
-        column=config.get('column', 'adj_close'),
-        db_path=config.get('db_path')
+        tickers,
+        data_conf.get('start_date', config.get('start_date')),
+        data_conf.get('end_date', config.get('end_date')),
+        column=data_conf.get('column', config.get('column', 'adj_close')),
+        db_path=data_conf.get('db_path', config.get('db_path'))
     )
     df_real = clean_data(df, strategy='ffill_drop')
 
@@ -153,7 +175,7 @@ def evaluate_model(config, tracker: ExperimentTracker):
     real_data_scaled = processor.transform(df_real)
 
     # Create windows
-    real_seqs_scaled = create_windows(real_data_scaled, sequence_length=config['sequence_length'])
+    real_seqs_scaled = create_windows(real_data_scaled, sequence_length=data_conf.get('sequence_length', config.get('sequence_length')))
     
     # Ensure we compare same amount of data if possible
     limit = min(len(real_seqs_scaled), num_samples)
@@ -229,12 +251,12 @@ def evaluate_model(config, tracker: ExperimentTracker):
     with tempfile.TemporaryDirectory() as tmpdir:
         # Plot correlation structure
         corr_plot_path = os.path.join(tmpdir, "correlation_structure.png")
-        plot_correlation_structure(corr_metrics, config['tickers'], save_path=corr_plot_path)
+        plot_correlation_structure(corr_metrics, tickers, save_path=corr_plot_path)
         tracker.log_artifact(corr_plot_path, artifact_type='plot')
 
         # Plot Stylized Facts
         sf_plot_path = os.path.join(tmpdir, "stylized_facts.png")
-        plot_stylized_facts(sf_metrics, config['tickers'], save_path=sf_plot_path)
+        plot_stylized_facts(sf_metrics, tickers, save_path=sf_plot_path)
         tracker.log_artifact(sf_plot_path, artifact_type='plot')
 
         # --- Visualizations (Price Paths) ---
@@ -252,9 +274,9 @@ def evaluate_model(config, tracker: ExperimentTracker):
         if features == 1:
             axes = [axes]
 
-        for i, ticker in enumerate(config['tickers']):
+        for i, ticker in enumerate(tickers):
             ax = axes[i]
-            real_price_section = df_real[ticker].iloc[-config['sequence_length']-1:].values
+            real_price_section = df_real[ticker].iloc[-data_conf.get('sequence_length', config.get('sequence_length'))-1:].values
             if len(real_price_section) > 0:
                 norm_real = real_price_section / real_price_section[0] * 100
                 ax.plot(norm_real, label='Real', color='black')

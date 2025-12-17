@@ -10,6 +10,7 @@ Provides different tracking backends:
 
 from tsgen.tracking.base import ExperimentTracker, NoOpTracker, ConsoleTracker, FileTracker, ArtifactType
 from tsgen.tracking.mlflow_tracker import MLFlowTracker
+from tsgen.tracking.factory import create_tracker
 
 __all__ = [
     # Base classes
@@ -19,6 +20,8 @@ __all__ = [
     "FileTracker",
     # Implementations
     "MLFlowTracker",
+    # Factory
+    "create_tracker",
     # Types
     "ArtifactType",
 ]

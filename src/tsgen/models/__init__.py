@@ -13,6 +13,7 @@ from tsgen.models.base_model import GenerativeModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
+from tsgen.models.mamba import MambaDiffusion
 from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.models.diffusion import DiffusionUtils
 from tsgen.models.factory import create_model
@@ -25,6 +26,7 @@ __all__ = [
     # Diffusion models
     "UNet1D",
     "DiffusionTransformer",
+    "MambaDiffusion",
     "DiffusionUtils",
     # Baseline models
     "MultivariateGBM",

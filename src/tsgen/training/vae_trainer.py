@@ -38,10 +38,14 @@ class VAETrainer(BaseTrainer):
     def __init__(self, model, config, tracker, device):
         super().__init__(model, config, tracker, device)
 
+        # Resolve configuration sections
+        training_conf = config.get('training', config)
+
         # Optimizer
+        learning_rate = training_conf.get('learning_rate', 1e-3)
         self.optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=float(config.get('learning_rate', 1e-3))
+            lr=float(learning_rate)
         )
 
         # VAE-specific hyperparameters
@@ -53,9 +57,10 @@ class VAETrainer(BaseTrainer):
         self.teacher_forcing_ratio = config.get('vae_teacher_forcing_ratio', 0.5)
 
         # Beta annealing schedule
+        epochs = training_conf.get('epochs', 10)
         if self.use_annealing:
             self.beta_schedule = linear_beta_schedule(
-                max_epochs=config['epochs'],
+                max_epochs=epochs,
                 warmup_epochs=self.annealing_epochs,
                 max_beta=self.beta
             )
@@ -91,14 +96,23 @@ class VAETrainer(BaseTrainer):
 
         step_count = 0
 
+        # Get epochs from training section
+        training_conf = self.config.get('training', self.config)
+        epochs = training_conf.get('epochs', 10)
+        start_epoch = self.config.get('start_epoch', 0)
+
+        # Load checkpoint if resuming
+        if start_epoch > 0:
+            print(f"Resuming training from epoch {start_epoch}")
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            for epoch in range(self.config['epochs']):
+            for epoch in range(start_epoch, epochs):
                 loss_tracker = VAELossTracker()
                 current_beta = self.beta_schedule(epoch)
 
                 pbar = tqdm(
                     dataloader,
-                    desc=f"Epoch {epoch+1}/{self.config['epochs']}",
+                    desc=f"Epoch {epoch+1}/{epochs}",
                     leave=False
                 )
 
@@ -183,11 +197,17 @@ class VAETrainer(BaseTrainer):
                     "collapsed": diag_status['collapsed']
                 }, step=step_count)
 
-                # Checkpointing
-                if (epoch + 1) % 10 == 0 or epoch == self.config['epochs'] - 1:
-                    ckpt_filename = f"timevae_epoch_{epoch+1}.pt"
+                # Checkpointing - save full checkpoint with optimizer state
+                if (epoch + 1) % 10 == 0 or epoch == epochs - 1:
+                    ckpt_filename = f"checkpoint_epoch_{epoch+1}.pt"
                     ckpt_path = os.path.join(tmpdir, ckpt_filename)
-                    self.save_model(ckpt_path)
+                    self.save_checkpoint(
+                        ckpt_path,
+                        epoch=epoch + 1,
+                        optimizer=self.optimizer,
+                        step_count=step_count,
+                        beta=current_beta
+                    )
                     self.tracker.log_artifact(ckpt_path, artifact_type='checkpoint')
 
             tqdm.write("TimeVAE Training Complete.")

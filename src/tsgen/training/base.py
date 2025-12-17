@@ -71,3 +71,50 @@ class BaseTrainer(ABC):
             path: Path where model should be saved
         """
         torch.save(self.model.state_dict(), path)
+
+    def save_checkpoint(self, path: str, epoch: int, optimizer=None, **extra_state):
+        """
+        Save full checkpoint with training state.
+
+        Args:
+            path: Path where checkpoint should be saved
+            epoch: Current epoch number
+            optimizer: Optimizer instance (optional)
+            **extra_state: Additional state to save (e.g., scheduler, metrics)
+        """
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'config': self.config,
+        }
+
+        if optimizer is not None:
+            checkpoint['optimizer_state_dict'] = optimizer.state_dict()
+
+        # Add any extra state (e.g., scheduler, best_loss, etc.)
+        checkpoint.update(extra_state)
+
+        torch.save(checkpoint, path)
+
+    def load_checkpoint(self, path: str, optimizer=None, strict=True):
+        """
+        Load checkpoint and restore training state.
+
+        Args:
+            path: Path to checkpoint file
+            optimizer: Optimizer instance to restore state into (optional)
+            strict: Whether to strictly enforce state_dict keys match
+
+        Returns:
+            dict: Checkpoint dictionary containing epoch and any extra state
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+
+        # Load model state
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
+
+        # Load optimizer state if provided
+        if optimizer is not None and 'optimizer_state_dict' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        return checkpoint

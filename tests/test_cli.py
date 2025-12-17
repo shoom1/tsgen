@@ -7,7 +7,8 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from tsgen.cli.main import load_config, get_tracker, setup_experiment
+from tsgen.cli.main import load_config, setup_experiment
+from tsgen.tracking.factory import create_tracker
 from tsgen.tracking.base import ConsoleTracker, NoOpTracker, FileTracker
 
 
@@ -52,48 +53,48 @@ def test_load_config_invalid_path():
         load_config('nonexistent_config.yaml')
 
 
-def test_get_tracker_console():
+def test_create_tracker_console():
     """Test creating console tracker."""
     config = {'tracker': 'console', 'experiment_name': 'test'}
-    tracker = get_tracker(config)
+    tracker = create_tracker(config)
 
     assert isinstance(tracker, ConsoleTracker)
 
 
-def test_get_tracker_noop():
+def test_create_tracker_noop():
     """Test creating no-op tracker."""
     config = {'tracker': 'noop', 'experiment_name': 'test'}
-    tracker = get_tracker(config)
+    tracker = create_tracker(config)
 
     assert isinstance(tracker, NoOpTracker)
 
 
-def test_get_tracker_file(temp_dir):
+def test_create_tracker_file(temp_dir):
     """Test creating file tracker."""
     config = {
         'tracker': 'file',
         'experiment_name': 'test',
         'log_file': os.path.join(temp_dir, 'test.log')
     }
-    tracker = get_tracker(config)
+    tracker = create_tracker(config)
 
     assert isinstance(tracker, FileTracker)
 
 
-def test_get_tracker_file_with_experiment_dir(temp_dir):
+def test_create_tracker_file_with_experiment_dir(temp_dir):
     """Test creating file tracker with experiment directory."""
     config = {'tracker': 'file', 'experiment_name': 'test'}
-    tracker = get_tracker(config, experiment_dir=temp_dir)
+    tracker = create_tracker(config, experiment_dir=temp_dir)
 
     assert isinstance(tracker, FileTracker)
 
 
-def test_get_tracker_unknown_defaults_to_console():
+def test_create_tracker_unknown_defaults_to_console():
     """Test that unknown tracker type defaults to console."""
     config = {'tracker': 'unknown_tracker', 'experiment_name': 'test'}
 
     with patch('builtins.print') as mock_print:
-        tracker = get_tracker(config)
+        tracker = create_tracker(config)
 
         # Should print warning
         mock_print.assert_called_once()
@@ -103,10 +104,10 @@ def test_get_tracker_unknown_defaults_to_console():
     assert isinstance(tracker, ConsoleTracker)
 
 
-def test_get_tracker_default():
+def test_create_tracker_default():
     """Test tracker defaults to console when not specified."""
     config = {'experiment_name': 'test'}  # No tracker specified
-    tracker = get_tracker(config)
+    tracker = create_tracker(config)
 
     assert isinstance(tracker, ConsoleTracker)
 
@@ -139,16 +140,16 @@ def test_setup_experiment_with_mock_manager(temp_dir):
         assert model_name == 'unet_v1'
 
 
-def test_get_tracker_mlflow():
+def test_create_tracker_mlflow():
     """Test creating MLflow tracker."""
     config = {'tracker': 'mlflow', 'experiment_name': 'test'}
 
     # Mock MLFlowTracker to avoid MLflow dependencies in tests
-    with patch('tsgen.cli.main.MLFlowTracker') as MockMLFlow:
+    with patch('tsgen.tracking.factory.MLFlowTracker') as MockMLFlow:
         mock_tracker = MagicMock()
         MockMLFlow.return_value = mock_tracker
 
-        tracker = get_tracker(config)
+        tracker = create_tracker(config)
 
         MockMLFlow.assert_called_once_with(
             experiment_name='test',
@@ -158,12 +159,11 @@ def test_get_tracker_mlflow():
         assert tracker == mock_tracker
 
 
-def test_get_tracker_output_dir_deprecation_warning(temp_dir):
-    """Test that output_dir config key triggers deprecation warning."""
+def test_create_tracker_output_dir_fallback(temp_dir):
+    """Test that output_dir config key still works as fallback."""
     config = {'tracker': 'file', 'output_dir': temp_dir}
 
-    with pytest.warns(DeprecationWarning, match="'output_dir' is deprecated"):
-        tracker = get_tracker(config)
+    tracker = create_tracker(config)
 
     # Should still work (backward compatibility)
     assert isinstance(tracker, FileTracker)
@@ -191,9 +191,9 @@ class TestMainCLI:
         try:
             with patch('sys.argv', ['tsgen', '--config', sample_config_file, '--mode', 'train']):
                 with patch('tsgen.cli.main.train_model') as mock_train:
-                    with patch('tsgen.cli.main.get_tracker') as mock_get_tracker:
+                    with patch('tsgen.cli.main.create_tracker') as mock_create_tracker:
                         mock_tracker = MagicMock()
-                        mock_get_tracker.return_value = mock_tracker
+                        mock_create_tracker.return_value = mock_tracker
                         mock_train.return_value = (MagicMock(), MagicMock())
 
                         from tsgen.cli.main import main
@@ -212,9 +212,9 @@ class TestMainCLI:
         try:
             with patch('sys.argv', ['tsgen', '--config', sample_config_file, '--mode', 'eval']):
                 with patch('tsgen.cli.main.evaluate_model') as mock_eval:
-                    with patch('tsgen.cli.main.get_tracker') as mock_get_tracker:
+                    with patch('tsgen.cli.main.create_tracker') as mock_create_tracker:
                         mock_tracker = MagicMock()
-                        mock_get_tracker.return_value = mock_tracker
+                        mock_create_tracker.return_value = mock_tracker
                         mock_eval.return_value = {'discriminator_accuracy': 0.5}
 
                         from tsgen.cli.main import main
@@ -234,9 +234,9 @@ class TestMainCLI:
             with patch('sys.argv', ['tsgen', '--config', sample_config_file, '--mode', 'train_eval']):
                 with patch('tsgen.cli.main.train_model') as mock_train:
                     with patch('tsgen.cli.main.evaluate_model') as mock_eval:
-                        with patch('tsgen.cli.main.get_tracker') as mock_get_tracker:
+                        with patch('tsgen.cli.main.create_tracker') as mock_create_tracker:
                             mock_tracker = MagicMock()
-                            mock_get_tracker.return_value = mock_tracker
+                            mock_create_tracker.return_value = mock_tracker
                             mock_train.return_value = (MagicMock(), MagicMock())
                             mock_eval.return_value = {'discriminator_accuracy': 0.5}
 

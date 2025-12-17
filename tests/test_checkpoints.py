@@ -18,7 +18,7 @@ from pathlib import Path
 from tsgen.models.factory import create_model
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
-from tsgen.models.baselines import GBMGenerativeModel, BootstrapGenerativeModel
+from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.data.processor import LogReturnProcessor
 import pandas as pd
 import numpy as np
@@ -206,7 +206,7 @@ def test_checkpoint_directory_structure(temp_dir):
 def test_gbm_baseline_save_load(temp_dir):
     """Test GBM baseline model save/load."""
     # Create GBM model
-    model = GBMGenerativeModel(features=2)
+    model = MultivariateGBM(features=2)
     model.mu = torch.tensor([0.001, 0.002])
     model.sigma = torch.tensor([0.02, 0.03])
 

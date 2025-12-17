@@ -9,66 +9,14 @@ from pathlib import Path
 
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
-from tsgen.tracking.mlflow_tracker import MLFlowTracker
-from tsgen.tracking.base import ConsoleTracker, NoOpTracker, FileTracker
+from tsgen.tracking.factory import create_tracker
+from tsgen.tracking.base import FileTracker
 from tsgen.experiments.manager import ExperimentManager
+from tsgen.training.checkpoint_utils import get_checkpoint_path, list_checkpoints
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-
-def get_tracker(config, experiment_dir=None):
-    """
-    Create tracker based on config.
-
-    Args:
-        config: Configuration dictionary
-        experiment_dir: Optional experiment directory for file-based tracking
-
-    Returns:
-        ExperimentTracker instance
-    """
-    # Warn about deprecated config keys
-    if 'output_dir' in config:
-        warnings.warn(
-            "Config key 'output_dir' is deprecated. "
-            "Use 'experiment_dir' instead, or let trackers manage artifact paths automatically. "
-            "For experiment management, use --experiment-number CLI flag.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-
-    tracker_type = config.get('tracker', 'console').lower()
-    exp_name = config.get('experiment_name', 'Default_Experiment')
-
-    if tracker_type == 'mlflow':
-        # Support optional MLflow configuration
-        return MLFlowTracker(
-            experiment_name=exp_name,
-            tracking_uri=config.get('mlflow_tracking_uri'),
-            artifact_location=config.get('mlflow_artifact_location')
-        )
-    elif tracker_type == 'console':
-        return ConsoleTracker()
-    elif tracker_type == 'file':
-        # Priority 1: Use experiment_dir parameter (multi-model experiments)
-        if experiment_dir:
-            return FileTracker(log_file="training.log", experiment_dir=experiment_dir)
-        # Priority 2: Use output_dir from config (multi-run experiments)
-        elif 'output_dir' in config:
-            return FileTracker(log_file="training.log", experiment_dir=config['output_dir'])
-        # Priority 3: Use experiment_dir from config (if specified)
-        elif 'experiment_dir' in config:
-            return FileTracker(log_file="training.log", experiment_dir=config['experiment_dir'])
-        # Priority 4: Standalone log file
-        else:
-            log_file = config.get('log_file', f"logs/{exp_name}.log")
-            return FileTracker(log_file=log_file)
-    elif tracker_type == 'noop':
-        return NoOpTracker()
-    else:
-        print(f"Warning: Unknown tracker '{tracker_type}'. Defaulting to Console.")
-        return ConsoleTracker()
 
 
 def setup_experiment(config, experiment_number, model_name):
@@ -90,18 +38,21 @@ def setup_experiment(config, experiment_number, model_name):
         return None, None
 
     manager = ExperimentManager()
+    
+    # Resolve experiment config section
+    exp_conf = config.get('experiment', config)
 
     # Check if experiment folder exists
     exp_path = manager.get_experiment_path(f"{experiment_number:04d}")
 
     if exp_path is None:
         # Create new experiment
-        exp_name = config.get('experiment_name', 'unnamed')
+        exp_name = exp_conf.get('name', config.get('experiment_name', 'unnamed'))
         short_name = exp_name.lower().replace('-', '_').replace(' ', '_')
         parts = short_name.split('_')
         short_name = '_'.join(parts[:3]) if len(parts) > 3 else short_name
 
-        description = config.get('experiment_description', '')
+        description = exp_conf.get('description', config.get('experiment_description', ''))
         exp_path = manager.create_experiment(
             name=short_name,
             config=None,  # Don't save single config for multi-model experiments
@@ -121,7 +72,12 @@ def setup_experiment(config, experiment_number, model_name):
 
     # Determine model name
     if model_name is None:
-        model_name = config.get('model_type', 'default')
+        # Check model section then root
+        model_conf = config.get('model', config)
+        if isinstance(model_conf, dict) and 'name' in model_conf:
+             model_name = model_conf['name']
+        else:
+             model_name = config.get('model_type', 'default')
 
     # Add model config to experiment
     manager.add_model_config(exp_path, model_name, config)
@@ -135,6 +91,9 @@ def main():
     parser.add_argument("--mode", type=str, default="train_eval", choices=["train", "eval", "train_eval"], help="Mode to run")
     parser.add_argument("--experiment-number", type=int, help="Experiment number (creates or adds to experiment folder)")
     parser.add_argument("--model-name", type=str, help="Model name within experiment (e.g., baseline, timevae)")
+    parser.add_argument("--resume-from-checkpoint", type=str, help="Path to checkpoint file to resume training from")
+    parser.add_argument("--resume-latest", action="store_true", help="Resume from latest checkpoint in experiment directory")
+    parser.add_argument("--list-checkpoints", action="store_true", help="List available checkpoints and exit")
     args = parser.parse_args()
 
     # Load config
@@ -142,6 +101,53 @@ def main():
 
     # Setup experiment structure
     experiment_dir, model_name = setup_experiment(config, args.experiment_number, args.model_name)
+
+    # Handle checkpoint listing
+    if args.list_checkpoints:
+        if not experiment_dir:
+            print("Error: --list-checkpoints requires --experiment-number")
+            return
+
+        checkpoint_dir = os.path.join(experiment_dir, 'artifacts', 'checkpoints')
+        checkpoints = list_checkpoints(checkpoint_dir)
+
+        if not checkpoints:
+            print(f"No checkpoints found in {checkpoint_dir}")
+        else:
+            print(f"\nAvailable checkpoints in experiment {args.experiment_number}:")
+            print(f"{'='*60}")
+            for epoch, path in checkpoints:
+                print(f"  Epoch {epoch:3d}: {os.path.basename(path)}")
+            print(f"{'='*60}")
+            print(f"\nTo resume from a checkpoint, use:")
+            print(f"  --resume-from-checkpoint {checkpoints[0][1]}")
+            print(f"Or use --resume-latest to automatically use the latest checkpoint")
+        return
+
+    # Handle checkpoint resumption
+    if args.resume_latest or args.resume_from_checkpoint:
+        if args.resume_latest:
+            if not experiment_dir:
+                print("Error: --resume-latest requires --experiment-number")
+                return
+
+            # Find latest checkpoint
+            checkpoint_path = get_checkpoint_path(experiment_dir)
+            if not checkpoint_path:
+                print(f"Error: No checkpoints found in {experiment_dir}/artifacts/checkpoints")
+                return
+
+            print(f"\n{'='*80}")
+            print(f"Auto-resuming from latest checkpoint: {os.path.basename(checkpoint_path)}")
+            print(f"{'='*80}\n")
+        else:
+            checkpoint_path = args.resume_from_checkpoint
+            if not os.path.exists(checkpoint_path):
+                print(f"Error: Checkpoint not found: {checkpoint_path}")
+                return
+
+        # Add checkpoint path to config for train.py to use
+        config['resume_from_checkpoint'] = checkpoint_path
 
     if experiment_dir:
         # Experiment mode: use model-specific tracker and paths
@@ -158,10 +164,12 @@ def main():
         print(f"Log file: {os.path.join(experiment_dir, f'training_{model_name}.log')}\n")
     else:
         # Standalone mode: use regular tracker
-        tracker = get_tracker(config)
+        tracker = create_tracker(config)
 
     try:
-        tracker.start_run(run_name=f"Run_{config.get('experiment_name', 'default')}_{model_name or 'default'}")
+        exp_conf = config.get('experiment', config)
+        exp_name = exp_conf.get('name', config.get('experiment_name', 'default'))
+        tracker.start_run(run_name=f"Run_{exp_name}_{model_name or 'default'}")
 
         if "train" in args.mode:
             train_model(config, tracker)

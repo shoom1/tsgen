@@ -56,8 +56,8 @@ def test_registry_get_vae_trainer():
 
 def test_registry_get_baseline_trainer():
     """Test getting baseline trainer from registry."""
-    from tsgen.models.baselines import GBMGenerativeModel
-    model = GBMGenerativeModel(features=2)
+    from tsgen.models.baselines import MultivariateGBM
+    model = MultivariateGBM(features=2)
     config = {'model_type': 'gbm', 'epochs': 1}
     tracker = NoOpTracker()
 
@@ -95,8 +95,8 @@ def test_trainer_has_common_interface():
     diff_model = torch.nn.Linear(10, 10)
     from tsgen.models.timevae import TimeVAE
     vae_model = TimeVAE(features=2, sequence_length=32, latent_dim=8, hidden_dim=16)
-    from tsgen.models.baselines import GBMGenerativeModel
-    baseline_model = GBMGenerativeModel(features=2)
+    from tsgen.models.baselines import MultivariateGBM
+    baseline_model = MultivariateGBM(features=2)
 
     tracker = NoOpTracker()
     device = 'cpu'

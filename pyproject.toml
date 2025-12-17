@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tsgen"
-version = "0.1.0"
+version = "0.3.2"
 description = "Synthetic Financial Time Series Generation using Diffusion Models"
 readme = "README.md"
 requires-python = ">=3.12"
