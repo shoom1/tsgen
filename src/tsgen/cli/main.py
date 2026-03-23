@@ -177,8 +177,9 @@ def main():
                 print(f"Error: Checkpoint not found: {checkpoint_path}")
                 return
 
-        # Add checkpoint path to config for train.py to use
-        config.resume_from_checkpoint = checkpoint_path
+        checkpoint_to_resume = checkpoint_path
+    else:
+        checkpoint_to_resume = None
 
     if experiment_dir:
         # Experiment mode: use model-specific tracker and paths
@@ -186,10 +187,6 @@ def main():
             log_file=f"training_{model_name}.log",
             experiment_dir=experiment_dir
         )
-
-        # Add experiment and model info to config for use in training/evaluation
-        config._experiment_path = experiment_dir
-        config._model_name = model_name
 
         print(f"Model: {model_name}")
         print(f"Log file: {os.path.join(experiment_dir, f'training_{model_name}.log')}\n")
@@ -202,7 +199,7 @@ def main():
         tracker.start_run(run_name=f"Run_{exp_name}_{model_name or 'default'}")
 
         if "train" in args.mode:
-            train_model(config, tracker)
+            train_model(config, tracker, resume_from_checkpoint=checkpoint_to_resume)
 
         if "eval" in args.mode:
             evaluate_model(config, tracker)

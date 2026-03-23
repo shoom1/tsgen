@@ -54,6 +54,17 @@ class DiffusionConfig(BaseModel):
         return v
 
 
+class VAEConfig(BaseModel):
+    """VAE-specific training hyperparameters."""
+
+    beta: float = 0.5
+    use_annealing: bool = True
+    annealing_epochs: int = 50
+    use_free_bits: bool = True
+    free_bits: float = 0.5
+    teacher_forcing_ratio: float = 0.5
+
+
 class TrainingConfig(BaseModel):
     """Training hyperparameters."""
 
@@ -64,6 +75,7 @@ class TrainingConfig(BaseModel):
     checkpoint_interval: int = 10
     validation_interval: int = 0
     num_validation_samples: int = 100
+    start_epoch: int = 0
 
     @field_validator('epochs', 'batch_size')
     @classmethod
@@ -168,6 +180,7 @@ class ExperimentConfig(BaseModel):
     diffusion: Optional[DiffusionConfig] = None
     model: Optional[ModelParamsConfig] = None
     evaluation: Optional[EvaluationConfig] = None
+    vae: Optional[VAEConfig] = None
     tracker: Optional[Union[TrackerConfig, str]] = None
 
     # Flat config fields (backward compatible)
@@ -245,6 +258,19 @@ class ExperimentConfig(BaseModel):
             heads=self.heads,
             num_classes=self.num_classes,
         )
+
+    def get_vae_config(self) -> VAEConfig:
+        """Get VAEConfig from nested section or flat fields."""
+        if self.vae:
+            return self.vae
+
+        kwargs = {}
+        for field_name in VAEConfig.model_fields:
+            # Check flat fields with vae_ prefix (backward compat)
+            val = getattr(self, f'vae_{field_name}', None)
+            if val is not None:
+                kwargs[field_name] = val
+        return VAEConfig(**kwargs)
 
     def get_evaluation_config(self) -> EvaluationConfig:
         """Get EvaluationConfig from nested section or flat fields with defaults."""

@@ -79,7 +79,7 @@ class DiffusionTrainer(BaseTrainer):
 
         # Use typed training config
         epochs = self.training_config.epochs
-        start_epoch = getattr(self.config, 'start_epoch', 0)
+        start_epoch = self.training_config.start_epoch
         checkpoint_interval = self.training_config.checkpoint_interval
 
         # Load checkpoint if resuming

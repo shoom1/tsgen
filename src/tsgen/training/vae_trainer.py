@@ -51,13 +51,14 @@ class VAETrainer(BaseTrainer):
         self.gradient_clip = self.training_config.gradient_clip
         self.checkpoint_interval = self.training_config.checkpoint_interval
 
-        # VAE-specific hyperparameters (extra fields, use getattr)
-        self.beta = getattr(config, 'vae_beta', 0.5)
-        self.use_annealing = getattr(config, 'vae_use_annealing', True)
-        self.annealing_epochs = getattr(config, 'vae_annealing_epochs', 50)
-        self.use_free_bits = getattr(config, 'vae_use_free_bits', True)
-        self.free_bits = getattr(config, 'vae_free_bits', 0.5)
-        self.teacher_forcing_ratio = getattr(config, 'vae_teacher_forcing_ratio', 0.5)
+        # VAE-specific hyperparameters from typed config
+        vae_config = config.get_vae_config()
+        self.beta = vae_config.beta
+        self.use_annealing = vae_config.use_annealing
+        self.annealing_epochs = vae_config.annealing_epochs
+        self.use_free_bits = vae_config.use_free_bits
+        self.free_bits = vae_config.free_bits
+        self.teacher_forcing_ratio = vae_config.teacher_forcing_ratio
 
         # Beta annealing schedule using typed epochs
         epochs = self.training_config.epochs
@@ -101,7 +102,7 @@ class VAETrainer(BaseTrainer):
 
         # Use typed training config
         epochs = self.training_config.epochs
-        start_epoch = getattr(self.config, 'start_epoch', 0)
+        start_epoch = self.training_config.start_epoch
 
         # Load checkpoint if resuming
         if start_epoch > 0:
