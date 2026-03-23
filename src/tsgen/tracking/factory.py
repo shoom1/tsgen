@@ -1,7 +1,6 @@
 """Factory for creating experiment trackers."""
 
 from tsgen.tracking.base import ConsoleTracker, NoOpTracker, FileTracker
-from tsgen.tracking.mlflow_tracker import MLFlowTracker
 
 
 def create_tracker(config, experiment_dir=None):
@@ -49,6 +48,7 @@ def create_tracker(config, experiment_dir=None):
         exp_name = _get('experiment_name', 'Default_Experiment')
 
     if output_type == 'mlflow':
+        from tsgen.tracking.mlflow_tracker import MLFlowTracker
         return MLFlowTracker(
             experiment_name=exp_name,
             tracking_uri=_get('mlflow_tracking_uri'),

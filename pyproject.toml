@@ -41,8 +41,6 @@ dependencies = [
     "matplotlib>=3.5.0",
     "pyyaml>=6.0",
     "tqdm>=4.0.0",
-    "mlflow>=2.0.0",
-    "pyarrow>=10.0.0",
     "joblib>=1.0.0",
     "pydantic>=2.0.0",
     # Note: findata dependency must be installed separately
@@ -50,6 +48,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mlflow = [
+    "mlflow>=2.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -90,6 +91,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "integration: tests requiring findata database (deselect with '-m \"not integration\"')",
+]
 
 [tool.black]
 line-length = 100

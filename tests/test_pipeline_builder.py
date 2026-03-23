@@ -391,8 +391,9 @@ class TestPipelineRegistry:
             assert isinstance(metadata['optional_params'], list)
 
 
+@pytest.mark.integration
 class TestPipelineIntegration:
-    """Integration tests for full pipeline execution."""
+    """Integration tests for full pipeline execution (requires findata database)."""
 
     def test_minimal_pipeline_execution(self):
         """Test executing minimal real pipeline."""

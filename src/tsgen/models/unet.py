@@ -31,6 +31,11 @@ class Block1D(nn.Module):
 class UNet1D(DiffusionModel):
     def __init__(self, sequence_length, features, base_channels=64):
         super().__init__()
+        if sequence_length % 4 != 0:
+            raise ValueError(
+                f"UNet1D requires sequence_length divisible by 4 (got {sequence_length}). "
+                f"Two levels of MaxPool1d(2) and Upsample(2) require this."
+            )
         self.features = features
         self.time_dim = base_channels * 4
         self.time_mlp = nn.Sequential(

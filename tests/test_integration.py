@@ -13,6 +13,8 @@ import torch
 import numpy as np
 import os
 import tempfile
+
+pytestmark = pytest.mark.integration
 import shutil
 from pathlib import Path
 

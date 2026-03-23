@@ -312,43 +312,6 @@ class TSTREvaluator(MetricEvaluator):
         return {"tstr_mse": float(tstr_mse)}
 
 
-class CompositeEvaluator(MetricEvaluator):
-    """
-    Compose multiple evaluators into a single evaluator.
-
-    Runs all child evaluators and aggregates their metrics.
-    """
-
-    def __init__(self, evaluators: list):
-        """
-        Initialize composite evaluator.
-
-        Args:
-            evaluators: List of MetricEvaluator instances
-        """
-        self.evaluators = evaluators
-
-    @property
-    def name(self) -> str:
-        return "composite"
-
-    def evaluate(
-        self,
-        real_data: np.ndarray,
-        synthetic_data: np.ndarray,
-        **kwargs
-    ) -> Dict[str, float]:
-        """Run all evaluators and aggregate metrics."""
-        all_metrics = {}
-        for evaluator in self.evaluators:
-            try:
-                metrics = evaluator.evaluate(real_data, synthetic_data, **kwargs)
-                all_metrics.update(metrics)
-            except Exception as e:
-                print(f"Warning: {evaluator.name} failed: {e}")
-        return all_metrics
-
-
 def create_default_evaluators(config=None) -> list:
     """
     Create default set of evaluators based on config.
