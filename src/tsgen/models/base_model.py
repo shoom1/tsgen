@@ -57,10 +57,16 @@ class DiffusionModel(BaseGenerativeModel):
     supports_conditioning: bool = False
     supports_masking: bool = False
 
-    # Diffusion sampling attributes (set by from_config)
+    # Diffusion sampling attributes (set by from_config via _apply_diffusion_config)
     _timesteps: int = 1000
     _sampling_method: str = 'ddpm'
     _num_inference_steps: int = 50
+
+    def _apply_diffusion_config(self, diff_config):
+        """Apply diffusion config attributes from a DiffusionConfig object."""
+        self._timesteps = diff_config.time_steps
+        self._sampling_method = diff_config.sampling_method
+        self._num_inference_steps = diff_config.num_inference_steps
 
     @abstractmethod
     def forward(self, x: torch.Tensor, t: torch.Tensor,

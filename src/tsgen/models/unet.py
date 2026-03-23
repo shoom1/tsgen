@@ -61,9 +61,7 @@ class UNet1D(DiffusionModel):
             features=features,
             base_channels=params.base_channels,
         )
-        model._timesteps = diff.time_steps
-        model._sampling_method = diff.sampling_method
-        model._num_inference_steps = diff.num_inference_steps
+        model._apply_diffusion_config(diff)
         return model
 
     def forward(self, x, t, y=None, mask=None):
@@ -80,7 +78,6 @@ class UNet1D(DiffusionModel):
         Returns:
             Predicted noise (Batch, Seq_Len, Features)
         """
-        # Note: UNet doesn't use class conditioning (y) or mask, parameters added for API compatibility
         x = x.transpose(1, 2)
         t = self.time_mlp(t)
         x1 = self.down1(x, t)

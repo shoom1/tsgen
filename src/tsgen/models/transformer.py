@@ -62,9 +62,7 @@ class DiffusionTransformer(DiffusionModel):
             dropout=params.dropout,
             num_classes=params.num_classes,
         )
-        model._timesteps = diff.time_steps
-        model._sampling_method = diff.sampling_method
-        model._num_inference_steps = diff.num_inference_steps
+        model._apply_diffusion_config(diff)
         return model
 
     def forward(self, x, t, y=None, mask=None):

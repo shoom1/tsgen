@@ -254,9 +254,7 @@ class MambaDiffusion(DiffusionModel):
             expand=params.expand,
             num_classes=params.num_classes,
         )
-        model._timesteps = diff.time_steps
-        model._sampling_method = diff.sampling_method
-        model._num_inference_steps = diff.num_inference_steps
+        model._apply_diffusion_config(diff)
         return model
 
     def forward(self, x, t, y=None, mask=None):
@@ -273,9 +271,6 @@ class MambaDiffusion(DiffusionModel):
         Returns:
             Predicted noise (Batch, Seq_Len, Features)
         """
-        # x: (B, L, Features)
-        # Note: Mamba doesn't use mask internally, parameter added for API compatibility
-
         # 1. Project Input
         x = self.input_proj(x)
 

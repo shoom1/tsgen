@@ -14,12 +14,8 @@ from tsgen.tracking.base import ConsoleTracker
 from tsgen.train import train_model
 from tsgen.config.schema import ExperimentConfig
 
-# Import model modules to trigger ModelRegistry registration
-import tsgen.models.unet
-import tsgen.models.transformer
-import tsgen.models.mamba
-import tsgen.models.baselines
-import tsgen.models.timevae
+# Import models package to trigger ModelRegistry registration
+import tsgen.models
 
 
 def get_backtest_output_dir(config):

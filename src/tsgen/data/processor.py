@@ -53,6 +53,31 @@ class LogReturnProcessor(DataProcessor):
         super().__init__()
         self.scaler = StandardScaler()
 
+    def _compute_masked_log_returns(self, df, mask):
+        """
+        Compute log returns with mask propagation.
+
+        Args:
+            df: Price DataFrame
+            mask: Mask DataFrame (1=valid, 0=missing)
+
+        Returns:
+            tuple: (log_returns_array, mask_array) where mask accounts for shift
+        """
+        mask_shifted = mask.shift(1)
+        return_mask = (mask * mask_shifted).iloc[1:]
+        mask_array = return_mask.values
+
+        df_prev = df.shift(1).iloc[1:]
+        df_curr = df.iloc[1:]
+
+        df_prev_safe = df_prev.where(df_prev != 0, 1.0)
+        ratio = df_curr / df_prev_safe
+        ratio = ratio.where(return_mask.astype(bool), 1.0)
+
+        log_returns_array = np.log(ratio.values)
+        return log_returns_array, mask_array
+
     def fit(self, df: pd.DataFrame, mask: pd.DataFrame = None):
         """
         Fit scaler on log returns.
@@ -63,30 +88,14 @@ class LogReturnProcessor(DataProcessor):
                   When provided, fits only on valid values
         """
         if mask is not None:
-            # Propagate mask: a return is valid only if both current and previous price are valid
-            mask_shifted = mask.shift(1)
-            return_mask = (mask * mask_shifted).iloc[1:]  # Drop first row (shift introduces NaN)
-            mask_array = return_mask.values.astype(bool)
-
-            # Compute log returns safely (avoiding division by zero)
-            # For masked positions, set ratio to 1 so log(1) = 0
-            df_prev = df.shift(1).iloc[1:]
-            df_curr = df.iloc[1:]
-
-            # Replace zeros with 1 to avoid division by zero
-            df_prev_safe = df_prev.where(df_prev != 0, 1.0)
-            ratio = df_curr / df_prev_safe
-
-            # For invalid positions, set ratio to 1 (log(1) = 0)
-            ratio = ratio.where(return_mask.astype(bool), 1.0)
-
-            log_returns_array = np.log(ratio.values)
+            log_returns_array, mask_array = self._compute_masked_log_returns(df, mask)
+            mask_bool = mask_array.astype(bool)
 
             # Compute mean and std per feature using only valid values
             means = []
             stds = []
             for i in range(log_returns_array.shape[1]):
-                valid_values = log_returns_array[mask_array[:, i], i]
+                valid_values = log_returns_array[mask_bool[:, i], i]
                 if len(valid_values) > 0:
                     means.append(np.mean(valid_values))
                     stds.append(np.std(valid_values) if len(valid_values) > 1 else 1.0)
@@ -99,7 +108,7 @@ class LogReturnProcessor(DataProcessor):
             self.scaler.scale_ = np.array(stds)
             self.scaler.var_ = self.scaler.scale_ ** 2
             self.scaler.n_features_in_ = log_returns_array.shape[1]
-            self.scaler.n_samples_seen_ = mask_array.sum(axis=0)
+            self.scaler.n_samples_seen_ = mask_bool.sum(axis=0)
         else:
             # Compute log returns: ln(P_t / P_{t-1})
             log_returns = np.log(df / df.shift(1))
@@ -122,28 +131,9 @@ class LogReturnProcessor(DataProcessor):
             raise ValueError("Processor not fitted. Call fit() first.")
 
         if mask is not None:
-            # Propagate mask: a return is valid only if both current and previous price are valid
-            mask_shifted = mask.shift(1)
-            return_mask = (mask * mask_shifted).iloc[1:]  # Drop first row
-            mask_array = return_mask.values
+            log_returns_array, mask_array = self._compute_masked_log_returns(df, mask)
 
-            # Compute log returns safely (avoiding division by zero)
-            df_prev = df.shift(1).iloc[1:]
-            df_curr = df.iloc[1:]
-
-            # Replace zeros with 1 to avoid division by zero
-            df_prev_safe = df_prev.where(df_prev != 0, 1.0)
-            ratio = df_curr / df_prev_safe
-
-            # For invalid positions, set ratio to 1 (log(1) = 0)
-            ratio = ratio.where(return_mask.astype(bool), 1.0)
-
-            log_returns_array = np.log(ratio.values)
-
-            # Transform
             scaled_returns = self.scaler.transform(log_returns_array)
-
-            # Zero out masked positions (they should be 0 after scaling too)
             scaled_returns = scaled_returns * mask_array
 
             return scaled_returns, mask_array

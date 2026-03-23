@@ -359,37 +359,26 @@ def create_default_evaluators(config=None) -> list:
     Returns:
         List of MetricEvaluator instances
     """
-    # Support ExperimentConfig (has get_evaluation_config) or dict
+    # Normalize config to EvaluationConfig
     if config is not None and hasattr(config, 'get_evaluation_config'):
         eval_conf = config.get_evaluation_config()
-        return [
-            StylizedFactsEvaluator(
-                lags=eval_conf.stylized_facts_lags,
-                alpha=eval_conf.var_alpha
-            ),
-            CorrelationEvaluator(window=20),
-            DistributionTestEvaluator(),
-            DiscriminatorEvaluator(
-                epochs=eval_conf.discriminator_epochs,
-                hidden_dim=eval_conf.discriminator_hidden_dim
-            ),
-            TSTREvaluator(epochs=eval_conf.tstr_epochs),
-        ]
-
-    # Fallback for dict or None
-    config = config or {}
-    eval_conf = config.get('evaluation', {})
+    elif isinstance(config, dict):
+        from tsgen.config.schema import EvaluationConfig
+        eval_conf = EvaluationConfig(**(config.get('evaluation', {})))
+    else:
+        from tsgen.config.schema import EvaluationConfig
+        eval_conf = EvaluationConfig()
 
     return [
         StylizedFactsEvaluator(
-            lags=eval_conf.get('stylized_facts_lags', 20),
-            alpha=eval_conf.get('var_alpha', 0.05)
+            lags=eval_conf.stylized_facts_lags,
+            alpha=eval_conf.var_alpha
         ),
         CorrelationEvaluator(window=20),
         DistributionTestEvaluator(),
         DiscriminatorEvaluator(
-            epochs=eval_conf.get('discriminator_epochs', 20),
-            hidden_dim=eval_conf.get('discriminator_hidden_dim', 64)
+            epochs=eval_conf.discriminator_epochs,
+            hidden_dim=eval_conf.discriminator_hidden_dim
         ),
-        TSTREvaluator(epochs=eval_conf.get('tstr_epochs', 10)),
+        TSTREvaluator(epochs=eval_conf.tstr_epochs),
     ]

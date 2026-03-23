@@ -21,7 +21,7 @@ from tsgen.config.schema import ExperimentConfig
 
 def load_config(config_path, validate=True):
     """
-    Load configuration from YAML file.
+    Load configuration from YAML file with user-friendly error formatting.
 
     Args:
         config_path: Path to YAML config file
@@ -33,12 +33,11 @@ def load_config(config_path, validate=True):
     Raises:
         ValidationError: If config validation fails
     """
-    with open(config_path, 'r') as f:
-        raw_config = yaml.safe_load(f)
+    from tsgen.config.schema import load_and_validate_config
 
     if validate:
         try:
-            return validate_config(raw_config)
+            return load_and_validate_config(config_path)
         except ValidationError as e:
             print(f"\nConfiguration validation failed for: {config_path}")
             print("=" * 60)
@@ -48,7 +47,9 @@ def load_config(config_path, validate=True):
             print("=" * 60)
             raise
 
-    # Unvalidated path: wrap raw dict in ExperimentConfig
+    # Unvalidated path: load raw YAML and wrap without validation
+    with open(config_path, 'r') as f:
+        raw_config = yaml.safe_load(f)
     return ExperimentConfig(**raw_config)
 
 

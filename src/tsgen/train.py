@@ -18,12 +18,8 @@ from tsgen.tracking.base import ExperimentTracker
 from tsgen.training.registry import TrainerRegistry
 from tsgen.training.checkpoint_utils import extract_epoch_from_checkpoint
 
-# Import model modules to trigger ModelRegistry registration
-import tsgen.models.unet
-import tsgen.models.transformer
-import tsgen.models.mamba
-import tsgen.models.baselines
-import tsgen.models.timevae
+# Import models package to trigger ModelRegistry registration
+import tsgen.models
 
 # Import trainers to trigger TrainerRegistry registration
 from tsgen.training.diffusion_trainer import DiffusionTrainer

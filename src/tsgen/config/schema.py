@@ -5,7 +5,7 @@ Provides structured config classes with validation, defaults, and
 backward compatibility for both flat and nested config formats.
 """
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any, Literal, Union
 
 
@@ -79,32 +79,6 @@ class TrainingConfig(BaseModel):
             raise ValueError('learning_rate must be positive')
         return v
 
-    @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> 'TrainingConfig':
-        """
-        Extract training config from flat or nested dict.
-
-        Supports both:
-            training:
-              epochs: 100
-        And:
-            epochs: 100
-        """
-        # Check for nested 'training' section first
-        training_section = config.get('training', {})
-        if isinstance(training_section, dict) and training_section:
-            return cls(**training_section)
-
-        # Fall back to flat config
-        return cls(
-            epochs=config.get('epochs', 100),
-            batch_size=config.get('batch_size', 32),
-            learning_rate=config.get('learning_rate', 1e-3),
-            gradient_clip=config.get('gradient_clip', 1.0),
-            checkpoint_interval=config.get('checkpoint_interval', 10),
-            validation_interval=config.get('validation_interval', 0),
-            num_validation_samples=config.get('num_validation_samples', 100),
-        )
 
 
 class ModelParamsConfig(BaseModel):
@@ -225,18 +199,6 @@ class ExperimentConfig(BaseModel):
 
     # Allow extra fields for extensibility
     model_config = {'extra': 'allow'}
-
-    @model_validator(mode='after')
-    def validate_data_source(self):
-        """Ensure data source is specified either in data section or flat."""
-        has_nested_tickers = self.data and self.data.tickers
-        has_flat_tickers = self.tickers and len(self.tickers) > 0
-
-        if not has_nested_tickers and not has_flat_tickers:
-            # This is okay - tickers might come from pipeline config
-            pass
-
-        return self
 
     def get_data_config(self) -> DataConfig:
         """Get unified DataConfig from nested or flat fields."""
