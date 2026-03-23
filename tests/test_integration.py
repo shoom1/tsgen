@@ -112,11 +112,11 @@ def test_evaluate_pipeline(minimal_config, temp_dir):
     # First train a model
     model, processor = train_model(minimal_config, tracker)
 
-    # Now evaluate it (evaluate_model still expects dict - Task 5)
-    eval_dict = {**minimal_config.to_dict(), 'num_samples': 100}
+    # Now evaluate it with ExperimentConfig directly
+    eval_config = ExperimentConfig(**{**minimal_config.to_dict(), 'num_samples': 100})
 
     # Run evaluation
-    result = evaluate_model(eval_dict, tracker)
+    result = evaluate_model(eval_config, tracker)
 
     # Verify metrics were computed
     assert result is not None
@@ -149,9 +149,9 @@ def test_train_eval_end_to_end(minimal_config, temp_dir):
     assert os.path.exists(os.path.join(temp_dir, 'artifacts', 'models', 'model_final.pt'))
     assert os.path.exists(os.path.join(temp_dir, 'artifacts', 'data', 'processor.pkl'))
 
-    # Step 3: Evaluate model (evaluate_model still expects dict - Task 5)
+    # Step 3: Evaluate model with ExperimentConfig directly
     print("\n=== Evaluating ===")
-    result = evaluate_model(config.to_dict(), tracker)
+    result = evaluate_model(config, tracker)
     assert result is not None
 
     # Step 4: Verify evaluation produced results

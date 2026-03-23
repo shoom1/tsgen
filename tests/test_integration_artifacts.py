@@ -105,8 +105,8 @@ def test_plot_organization(minimal_config):
         # Train and evaluate to generate plots
         train_model(minimal_config, tracker)
 
-        eval_dict = {**minimal_config.to_dict(), 'num_samples': 50}
-        evaluate_model(eval_dict, tracker)
+        eval_config = ExperimentConfig(**{**minimal_config.to_dict(), 'num_samples': 50})
+        evaluate_model(eval_config, tracker)
 
         # Check plot locations
         plots_dir = Path(tmpdir) / 'artifacts' / 'plots'
@@ -135,8 +135,9 @@ def test_typed_subdirectories_complete(minimal_config):
         config = ExperimentConfig(**{**minimal_config.to_dict(), 'epochs': 10})
         train_model(config, tracker)
 
-        # Evaluate model (creates plots) - evaluate_model still expects dict (Task 5)
-        evaluate_model({**config.to_dict(), 'num_samples': 50}, tracker)
+        # Evaluate model (creates plots) - now accepts ExperimentConfig
+        eval_config = ExperimentConfig(**{**config.to_dict(), 'num_samples': 50})
+        evaluate_model(eval_config, tracker)
 
         artifacts_dir = Path(tmpdir) / 'artifacts'
 

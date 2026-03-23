@@ -53,8 +53,8 @@ class TestEvaluateWithPipeline:
             model, processor = train_model(pipeline_config, tracker)
             assert model is not None
 
-            # Now evaluate (evaluate_model still expects dict - Task 5)
-            result = evaluate_model(pipeline_config.to_dict(), tracker)
+            # Now evaluate with ExperimentConfig directly
+            result = evaluate_model(pipeline_config, tracker)
 
             # Verify metrics were computed
             assert result is not None

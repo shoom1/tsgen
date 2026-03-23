@@ -205,14 +205,14 @@ def main():
         exp_name = exp_conf.get('name', config.get('experiment_name', 'default'))
         tracker.start_run(run_name=f"Run_{exp_name}_{model_name or 'default'}")
 
+        # Both train_model and evaluate_model expect ExperimentConfig
+        exp_config = ExperimentConfig(**config) if isinstance(config, dict) else config
+
         if "train" in args.mode:
-            # train_model expects ExperimentConfig
-            train_config = ExperimentConfig(**config) if isinstance(config, dict) else config
-            train_model(train_config, tracker)
+            train_model(exp_config, tracker)
 
         if "eval" in args.mode:
-            # evaluate_model still expects dict (will be converted in Task 5)
-            evaluate_model(config if isinstance(config, dict) else config.to_dict(), tracker)
+            evaluate_model(exp_config, tracker)
 
         tracker.end_run()
 

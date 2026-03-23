@@ -285,10 +285,17 @@ class ExperimentConfig(BaseModel):
         )
 
     def get_evaluation_config(self) -> EvaluationConfig:
-        """Get EvaluationConfig with defaults."""
+        """Get EvaluationConfig from nested section or flat fields with defaults."""
         if self.evaluation:
             return self.evaluation
-        return EvaluationConfig()
+
+        # Build from flat/extra fields if present
+        kwargs = {}
+        for field_name in EvaluationConfig.model_fields:
+            val = getattr(self, field_name, None)
+            if val is not None:
+                kwargs[field_name] = val
+        return EvaluationConfig(**kwargs)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> 'ExperimentConfig':

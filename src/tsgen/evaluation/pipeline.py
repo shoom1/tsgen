@@ -113,14 +113,14 @@ class EvaluationPipeline:
     @classmethod
     def from_config(
         cls,
-        config: Dict[str, Any],
+        config,
         tracker: Optional[ExperimentTracker] = None
     ) -> 'EvaluationPipeline':
         """
-        Create pipeline from configuration dictionary.
+        Create pipeline from ExperimentConfig or configuration dictionary.
 
         Args:
-            config: Configuration dictionary
+            config: ExperimentConfig or configuration dictionary
             tracker: Optional experiment tracker
 
         Returns:

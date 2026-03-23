@@ -23,17 +23,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import tempfile
-from tsgen.models.factory import create_model
-from tsgen.models.diffusion import DiffusionUtils
+from tsgen.models.registry import ModelRegistry
 from tsgen.models.base_model import StatisticalModel
 from tsgen.data.pipeline import load_prices, clean_data, create_windows
 from tsgen.data.processor import DataProcessor
 from tsgen.tracking.base import ExperimentTracker
 from tsgen.evaluation import EvaluationPipeline, EvaluationResult
+from tsgen.config.schema import ExperimentConfig
 
 
 def evaluate_model(
-    config: dict,
+    config: ExperimentConfig,
     tracker: ExperimentTracker,
     pipeline: EvaluationPipeline = None
 ) -> EvaluationResult:
@@ -46,7 +46,7 @@ def evaluate_model(
     discriminator, TSTR).
 
     Args:
-        config: Configuration dictionary
+        config: ExperimentConfig instance
         tracker: Experiment tracker for logging
         pipeline: Optional custom EvaluationPipeline (uses default if None)
 
@@ -70,11 +70,11 @@ def evaluate_model(
     print("Evaluating...")
 
     # Resolve config sections
-    data_conf = config.get('data', config)
-    tickers = data_conf.get('tickers')
+    data_conf = config.get_data_config()
+    tickers = data_conf.tickers
 
     # Model Factory
-    model = create_model(config).to(device)
+    model = ModelRegistry.create(config).to(device)
 
     try:
         # Get artifact paths via tracker
@@ -83,13 +83,16 @@ def evaluate_model(
 
         # Fallback for trackers that don't implement get_artifact_path
         if model_path is None:
-            if 'output_dir' in config:
-                model_path = os.path.join(config['output_dir'], "model_final.pt")
-                processor_path = os.path.join(config['output_dir'], "processor.pkl")
+            output_dir = getattr(config, 'output_dir', None)
+            if output_dir:
+                model_path = os.path.join(output_dir, "model_final.pt")
+                processor_path = os.path.join(output_dir, "processor.pkl")
             else:
                 model_path = "model_final.pt"
                 processor_path = "processor.pkl"
 
+        # isinstance check for model loading only (serialization concern:
+        # StatisticalModel saves full object, DiffusionModel saves state_dict)
         if isinstance(model, StatisticalModel):
             model = torch.load(model_path, map_location=device)
         else:
@@ -106,72 +109,54 @@ def evaluate_model(
         raise
 
     # Resolve diffusion config
-    diff_conf = config.get('diffusion', config)
-    timesteps = diff_conf.get('time_steps', diff_conf.get('T', config.get('timesteps', 1000)))
+    diff_conf = config.get_diffusion_config()
+    timesteps = diff_conf.time_steps
 
     # Handle tickers recovery from processor
-    if tickers is None:
+    if not tickers:
         if hasattr(processor, 'feature_names_in_'):
             tickers = list(processor.feature_names_in_)
         elif hasattr(processor, 'n_features_'):
             tickers = [f"Asset_{i}" for i in range(processor.n_features_)]
-        config['tickers'] = tickers
 
     features = len(tickers)
 
     # Generate synthetic samples
-    num_samples = config.get('evaluation', config).get('num_samples', 500)
+    eval_conf = config.get_evaluation_config()
+    num_samples = eval_conf.num_samples
     print(f"Generating {num_samples} synthetic samples...")
 
     # Conditional Generation Setup (for class-conditioned models)
-    model_conf = config.get('model', config)
-    num_classes = model_conf.get('params', model_conf).get('num_classes', 0) if isinstance(model_conf, dict) else config.get('num_classes', 0)
+    model_params = config.get_model_params_config()
+    num_classes = model_params.num_classes
     y_sampling = None
     if num_classes > 0:
         y_sampling = torch.randint(0, num_classes, (num_samples,), device=device).long()
         print(f"Generating samples conditioned on {num_classes} classes.")
 
-    if isinstance(model, StatisticalModel):
-        gen_seqs = model.sample(
-            num_samples,
-            data_conf.get('sequence_length', config.get('sequence_length'))
-        ).to(device)
-    else:
-        diff_utils = DiffusionUtils(T=timesteps, device=device)
-        sampling_method = diff_conf.get('sampling_method', 'ddpm').lower()
-
-        if sampling_method == 'ddim':
-            ddim_steps = diff_conf.get('num_inference_steps', 50)
-            gen_seqs = diff_utils.ddim_sample(
-                model,
-                image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features),
-                batch_size=num_samples,
-                num_inference_steps=ddim_steps,
-                y=y_sampling
-            )
-        else:
-            gen_seqs = diff_utils.sample(
-                model,
-                image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features),
-                batch_size=num_samples,
-                y=y_sampling
-            )
+    # Use unified generate() interface for all model types
+    gen_seqs = model.generate(
+        n_samples=num_samples,
+        seq_len=data_conf.sequence_length,
+        device=device,
+        y=y_sampling
+    )
 
     gen_seqs_np = gen_seqs.cpu().numpy()
 
     # Load and prepare real data
     df = load_prices(
         tickers,
-        data_conf.get('start_date', config.get('start_date')),
-        data_conf.get('end_date', config.get('end_date')),
-        column=data_conf.get('column', config.get('column', 'adj_close')),
-        db_path=data_conf.get('db_path', config.get('db_path'))
+        data_conf.start_date,
+        data_conf.end_date,
+        column=data_conf.column,
+        db_path=data_conf.db_path
     )
     df_real = clean_data(df, strategy='ffill_drop')
     real_data_scaled = processor.transform(df_real)
     real_seqs_scaled = create_windows(
         real_data_scaled,
-        sequence_length=data_conf.get('sequence_length', config.get('sequence_length'))
+        sequence_length=data_conf.sequence_length
     )
 
     # Ensure we compare same amount of data
@@ -206,7 +191,7 @@ def evaluate_model(
         # Also generate price path comparison plot
         _generate_price_comparison_plot(
             gen_seqs_np, processor, features, tickers,
-            df_real, data_conf, config, tmpdir, tracker
+            df_real, data_conf, tmpdir, tracker
         )
 
     print(f"\nEvaluation complete.")
@@ -217,7 +202,7 @@ def evaluate_model(
 
 def _generate_price_comparison_plot(
     gen_seqs_np, processor, features, tickers,
-    df_real, data_conf, config, tmpdir, tracker
+    df_real, data_conf, tmpdir, tracker
 ):
     """Generate price path comparison plot (helper function)."""
     subset_size = 5
@@ -229,7 +214,7 @@ def _generate_price_comparison_plot(
     if features == 1:
         axes = [axes]
 
-    seq_len = data_conf.get('sequence_length', config.get('sequence_length'))
+    seq_len = data_conf.sequence_length
 
     for i, ticker in enumerate(tickers):
         ax = axes[i]

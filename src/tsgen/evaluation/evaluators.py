@@ -349,16 +349,34 @@ class CompositeEvaluator(MetricEvaluator):
         return all_metrics
 
 
-def create_default_evaluators(config: Optional[Dict[str, Any]] = None) -> list:
+def create_default_evaluators(config=None) -> list:
     """
     Create default set of evaluators based on config.
 
     Args:
-        config: Optional configuration dictionary
+        config: ExperimentConfig or optional configuration dictionary
 
     Returns:
         List of MetricEvaluator instances
     """
+    # Support ExperimentConfig (has get_evaluation_config) or dict
+    if config is not None and hasattr(config, 'get_evaluation_config'):
+        eval_conf = config.get_evaluation_config()
+        return [
+            StylizedFactsEvaluator(
+                lags=eval_conf.stylized_facts_lags,
+                alpha=eval_conf.var_alpha
+            ),
+            CorrelationEvaluator(window=20),
+            DistributionTestEvaluator(),
+            DiscriminatorEvaluator(
+                epochs=eval_conf.discriminator_epochs,
+                hidden_dim=eval_conf.discriminator_hidden_dim
+            ),
+            TSTREvaluator(epochs=eval_conf.tstr_epochs),
+        ]
+
+    # Fallback for dict or None
     config = config or {}
     eval_conf = config.get('evaluation', {})
 
