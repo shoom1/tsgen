@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 
 class Block1D(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim, kernel_size=3):
@@ -26,9 +27,11 @@ class Block1D(nn.Module):
         h = self.relu(h)
         return h
 
+@ModelRegistry.register('unet')
 class UNet1D(DiffusionModel):
     def __init__(self, sequence_length, features, base_channels=64):
         super().__init__()
+        self.features = features
         self.time_dim = base_channels * 4
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(base_channels),
@@ -45,6 +48,23 @@ class UNet1D(DiffusionModel):
         self.up1 = Block1D(base_channels * 4 + base_channels * 2, base_channels * 2, self.time_dim)
         self.up2 = Block1D(base_channels * 2 + base_channels, base_channels, self.time_dim)
         self.final_conv = nn.Conv1d(base_channels, features, kernel_size=1)
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create UNet1D from ExperimentConfig."""
+        data = config.get_data_config()
+        params = config.get_model_params_config()
+        diff = config.get_diffusion_config()
+        features = features or len(data.tickers)
+        model = cls(
+            sequence_length=data.sequence_length,
+            features=features,
+            base_channels=params.base_channels,
+        )
+        model._timesteps = diff.time_steps
+        model._sampling_method = diff.sampling_method
+        model._num_inference_steps = diff.num_inference_steps
+        return model
 
     def forward(self, x, t, y=None, mask=None):
         """

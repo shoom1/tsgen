@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5):
@@ -180,6 +181,7 @@ class MambaBlock(nn.Module):
         # 5. Out-projection
         return self.out_proj(output)
 
+@ModelRegistry.register('mamba')
 class MambaDiffusion(DiffusionModel):
     """
     Diffusion Model using Mamba (S4) backbone.
@@ -188,17 +190,18 @@ class MambaDiffusion(DiffusionModel):
     supports_conditioning = True
     supports_masking = False  # Mamba is sequential, doesn't use attention masking
     def __init__(
-        self, 
-        sequence_length: int, 
-        features: int, 
-        dim: int = 128, 
-        depth: int = 4, 
+        self,
+        sequence_length: int,
+        features: int,
+        dim: int = 128,
+        depth: int = 4,
         d_state: int = 16,
         d_conv: int = 4,
         expand: int = 2,
         num_classes: int = 0
     ):
         super().__init__()
+        self.features = features
         self.dim = dim
         self.num_classes = num_classes
 
@@ -233,6 +236,28 @@ class MambaDiffusion(DiffusionModel):
         
         self.norm_f = RMSNorm(dim)
         self.output_proj = nn.Linear(dim, features)
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create MambaDiffusion from ExperimentConfig."""
+        data = config.get_data_config()
+        params = config.get_model_params_config()
+        diff = config.get_diffusion_config()
+        features = features or len(data.tickers)
+        model = cls(
+            sequence_length=data.sequence_length,
+            features=features,
+            dim=params.dim,
+            depth=params.depth,
+            d_state=params.d_state,
+            d_conv=params.d_conv,
+            expand=params.expand,
+            num_classes=params.num_classes,
+        )
+        model._timesteps = diff.time_steps
+        model._sampling_method = diff.sampling_method
+        model._num_inference_steps = diff.num_inference_steps
+        return model
 
     def forward(self, x, t, y=None, mask=None):
         """

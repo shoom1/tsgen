@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 
+
+@ModelRegistry.register('transformer')
 class DiffusionTransformer(DiffusionModel):
     """
     A simplified Diffusion Transformer (DiT) for 1D time series.
@@ -13,6 +16,7 @@ class DiffusionTransformer(DiffusionModel):
     supports_masking = True
     def __init__(self, sequence_length, features, dim=128, depth=4, heads=4, mlp_dim=256, dropout=0.0, num_classes=0):
         super().__init__()
+        self.features = features
         self.dim = dim
         self.num_classes = num_classes
         
@@ -40,6 +44,28 @@ class DiffusionTransformer(DiffusionModel):
         
         # Output projection: Embedding Dim -> Features
         self.output_proj = nn.Linear(dim, features)
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create DiffusionTransformer from ExperimentConfig."""
+        data = config.get_data_config()
+        params = config.get_model_params_config()
+        diff = config.get_diffusion_config()
+        features = features or len(data.tickers)
+        model = cls(
+            sequence_length=data.sequence_length,
+            features=features,
+            dim=params.dim,
+            depth=params.depth,
+            heads=params.heads,
+            mlp_dim=params.mlp_dim,
+            dropout=params.dropout,
+            num_classes=params.num_classes,
+        )
+        model._timesteps = diff.time_steps
+        model._sampling_method = diff.sampling_method
+        model._num_inference_steps = diff.num_inference_steps
+        return model
 
     def forward(self, x, t, y=None, mask=None):
         """

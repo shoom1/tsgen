@@ -17,6 +17,28 @@ class BaseGenerativeModel(nn.Module, ABC):
         """Return model type identifier for factory/registry lookup."""
         return self.__class__.__name__.lower()
 
+    @classmethod
+    @abstractmethod
+    def from_config(cls, config, features: int = None):
+        """Create model instance from ExperimentConfig."""
+        pass
+
+    @abstractmethod
+    def generate(self, n_samples: int, seq_len: int, device: str = 'cpu', **kwargs) -> torch.Tensor:
+        """
+        Generate synthetic samples.
+
+        Args:
+            n_samples: Number of samples to generate
+            seq_len: Length of each generated sequence
+            device: Device to generate on
+            **kwargs: Additional model-specific arguments
+
+        Returns:
+            torch.Tensor: Generated samples (n_samples, seq_len, features)
+        """
+        pass
+
 
 class DiffusionModel(BaseGenerativeModel):
     """
@@ -35,6 +57,11 @@ class DiffusionModel(BaseGenerativeModel):
     supports_conditioning: bool = False
     supports_masking: bool = False
 
+    # Diffusion sampling attributes (set by from_config)
+    _timesteps: int = 1000
+    _sampling_method: str = 'ddpm'
+    _num_inference_steps: int = 50
+
     @abstractmethod
     def forward(self, x: torch.Tensor, t: torch.Tensor,
                 y: torch.Tensor = None, mask: torch.Tensor = None) -> torch.Tensor:
@@ -52,6 +79,34 @@ class DiffusionModel(BaseGenerativeModel):
             torch.Tensor: Predicted noise (Batch, Seq_Len, Features)
         """
         pass
+
+    def generate(self, n_samples: int, seq_len: int, device: str = 'cpu', **kwargs) -> torch.Tensor:
+        """
+        Generate samples using DDPM or DDIM sampling.
+
+        Args:
+            n_samples: Number of samples to generate
+            seq_len: Sequence length of each sample
+            device: Device to generate on
+            **kwargs: Additional arguments (e.g., y for class conditioning)
+
+        Returns:
+            torch.Tensor: Generated samples (n_samples, seq_len, features)
+        """
+        from tsgen.models.diffusion import DiffusionUtils
+        y = kwargs.get('y', None)
+        # Cache DiffusionUtils to avoid recomputing alpha schedules
+        if not hasattr(self, '_diff_utils') or self._diff_utils_device != device:
+            self._diff_utils = DiffusionUtils(T=self._timesteps, device=device)
+            self._diff_utils_device = device
+        image_size = (seq_len, self.features)
+        if self._sampling_method == 'ddim':
+            return self._diff_utils.ddim_sample(
+                self, image_size=image_size, batch_size=n_samples,
+                num_inference_steps=self._num_inference_steps, y=y)
+        else:
+            return self._diff_utils.sample(
+                self, image_size=image_size, batch_size=n_samples, y=y)
 
 
 class VAEModel(BaseGenerativeModel):
@@ -121,18 +176,24 @@ class VAEModel(BaseGenerativeModel):
         pass
 
     @abstractmethod
-    def sample(self, n_samples: int, sequence_length: int = None) -> torch.Tensor:
+    def generate(self, n_samples: int, seq_len: int = None, device: str = 'cpu', **kwargs) -> torch.Tensor:
         """
         Generate samples from prior distribution.
 
         Args:
             n_samples: Number of samples to generate
-            sequence_length: Length of sequences (may be fixed for some architectures)
+            seq_len: Length of sequences (may be fixed for some architectures)
+            device: Device to generate on
+            **kwargs: Additional model-specific arguments
 
         Returns:
-            torch.Tensor: Generated samples (n_samples, sequence_length, features)
+            torch.Tensor: Generated samples (n_samples, seq_len, features)
         """
         pass
+
+    def sample(self, n_samples: int, sequence_length: int = None) -> torch.Tensor:
+        """Backward-compatible wrapper. Use generate() instead."""
+        return self.generate(n_samples, seq_len=sequence_length)
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """
@@ -175,18 +236,24 @@ class StatisticalModel(BaseGenerativeModel):
         pass
 
     @abstractmethod
-    def sample(self, n_samples: int, sequence_length: int) -> torch.Tensor:
+    def generate(self, n_samples: int, seq_len: int, device: str = 'cpu', **kwargs) -> torch.Tensor:
         """
         Generate synthetic samples.
 
         Args:
             n_samples: Number of sample sequences to generate
-            sequence_length: Length of each generated sequence
+            seq_len: Length of each generated sequence
+            device: Device to generate on
+            **kwargs: Additional model-specific arguments
 
         Returns:
-            torch.Tensor: Generated samples (n_samples, sequence_length, features)
+            torch.Tensor: Generated samples (n_samples, seq_len, features)
         """
         pass
+
+    def sample(self, n_samples: int, sequence_length: int = None) -> torch.Tensor:
+        """Backward-compatible wrapper. Use generate() instead."""
+        return self.generate(n_samples, seq_len=sequence_length)
 
 
 # Backward compatibility alias

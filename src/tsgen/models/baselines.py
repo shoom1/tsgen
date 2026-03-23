@@ -1,8 +1,10 @@
 import torch
 import numpy as np
 from tsgen.models.base_model import StatisticalModel
+from tsgen.models.registry import ModelRegistry
 
 
+@ModelRegistry.register('gbm', 'multivariate_gbm', 'multivariate_lognormal')
 class MultivariateGBM(StatisticalModel):
     """
     Multivariate Geometric Brownian Motion baseline model.
@@ -21,6 +23,19 @@ class MultivariateGBM(StatisticalModel):
     It's a statistical fit (not gradient-based training), using 'fit' and 'sample'
     lifecycle instead of the diffusion training loop.
     """
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create MultivariateGBM from ExperimentConfig."""
+        data = config.get_data_config()
+        features = features or len(data.tickers)
+        # Determine covariance mode based on model_type
+        if config.model_type == 'gbm':
+            full_covariance = False
+        else:
+            # 'multivariate_gbm', 'multivariate_lognormal' use full covariance
+            full_covariance = True
+        return cls(features=features, full_covariance=full_covariance)
 
     def __init__(self, features, full_covariance=True):
         super().__init__()
@@ -191,7 +206,7 @@ class MultivariateGBM(StatisticalModel):
         corr = cov / torch.outer(std, std)
         return corr
 
-    def sample(self, n_samples, sequence_length):
+    def generate(self, n_samples, seq_len, device='cpu', **kwargs):
         """
         Generates synthetic samples.
 
@@ -205,14 +220,16 @@ class MultivariateGBM(StatisticalModel):
 
         Args:
             n_samples: Number of sample sequences to generate
-            sequence_length: Length of each sequence
+            seq_len: Length of each sequence
+            device: Device to generate on
+            **kwargs: Additional arguments (unused)
 
         Returns:
-            Tensor of shape (n_samples, sequence_length, features)
+            Tensor of shape (n_samples, seq_len, features)
         """
         if self.full_covariance:
-            # Sample from standard normal: (n_samples, sequence_length, features)
-            z = torch.randn(n_samples, sequence_length, self.features,
+            # Sample from standard normal: (n_samples, seq_len, features)
+            z = torch.randn(n_samples, seq_len, self.features,
                            device=self.cholesky_L.device)
 
             # Transform to correlated samples: x = mean + z @ L.T
@@ -220,17 +237,25 @@ class MultivariateGBM(StatisticalModel):
         else:
             # Independent sampling per feature
             samples = torch.normal(
-                mean=self.mu.expand(n_samples, sequence_length, -1),
-                std=self.sigma.expand(n_samples, sequence_length, -1)
+                mean=self.mu.expand(n_samples, seq_len, -1),
+                std=self.sigma.expand(n_samples, seq_len, -1)
             )
 
-        return samples
+        return samples.to(device)
 
+@ModelRegistry.register('bootstrap')
 class BootstrapGenerativeModel(StatisticalModel):
     """
     Historical Bootstrap (Block Bootstrap) Generative Model.
     Resamples blocks from historical data.
     """
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create BootstrapGenerativeModel from ExperimentConfig."""
+        data = config.get_data_config()
+        features = features or len(data.tickers)
+        return cls(features=features, sequence_length=data.sequence_length)
 
     def __init__(self, features, sequence_length):
         super().__init__()
@@ -285,10 +310,22 @@ class BootstrapGenerativeModel(StatisticalModel):
             raise ValueError("No fully valid windows found in training data. "
                            "Consider using a different model or adjusting data cleaning strategy.")
 
-    def sample(self, n_samples, sequence_length=None):
+    def generate(self, n_samples, seq_len=None, device='cpu', **kwargs):
+        """
+        Generate samples by resampling from historical windows.
+
+        Args:
+            n_samples: Number of samples to generate
+            seq_len: Not used (fixed by stored history), kept for API compatibility
+            device: Device to generate on
+            **kwargs: Additional arguments (unused)
+
+        Returns:
+            Tensor of shape (n_samples, sequence_length, features)
+        """
         if self.history is None:
             raise ValueError("Model not fitted.")
 
         # Randomly sample indices
         indices = torch.randint(0, len(self.history), (n_samples,))
-        return self.history[indices]
+        return self.history[indices].to(device)

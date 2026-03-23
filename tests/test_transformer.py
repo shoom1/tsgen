@@ -1,23 +1,25 @@
 import pytest
 import torch
-from tsgen.models.factory import create_model
+from tsgen.models.registry import ModelRegistry
+from tsgen.config.schema import ExperimentConfig
 from tsgen.models.transformer import DiffusionTransformer
 
-def test_factory_transformer_creation():
-    config = {
-        'model_type': 'transformer',
-        'sequence_length': 32,
-        'tickers': ['AAPL'],
-        'dim': 32,
-        'depth': 2,
-        'heads': 2,
-        'mlp_dim': 64
-    }
-    
-    model = create_model(config)
-    
+def test_registry_transformer_creation():
+    """Test creating Transformer via ModelRegistry."""
+    config = ExperimentConfig(
+        model_type='transformer',
+        sequence_length=32,
+        tickers=['AAPL'],
+        dim=32,
+        depth=2,
+        heads=2,
+    )
+
+    model = ModelRegistry.create(config)
+
     assert isinstance(model, DiffusionTransformer)
     assert model.dim == 32
+    assert model.features == 1
 
 def test_transformer_forward_shape():
     seq_len = 16

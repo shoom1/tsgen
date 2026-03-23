@@ -78,7 +78,7 @@ def test_multivariate_sample(synthetic_dataloader):
     # Generate samples
     num_samples = 100
     seq_len = 64
-    samples = model.sample(num_samples, seq_len)
+    samples = model.generate(num_samples, seq_len)
 
     # Verify sample shape
     assert samples.shape == (num_samples, seq_len, 3)
@@ -124,7 +124,7 @@ def test_multivariate_correlation_structure():
     assert torch.allclose(learned_cov, true_cov, atol=0.15)
 
     # Generate samples and verify correlation
-    samples = model.sample(10000, 100)
+    samples = model.generate(10000, 100)
     samples_flat = samples.reshape(-1, 2).numpy()
 
     # Compute empirical correlation
@@ -161,8 +161,8 @@ def test_multivariate_vs_gbm_correlation():
     independent.fit(dataloader)
 
     # Generate samples
-    mv_samples = multivariate.sample(5000, 100).reshape(-1, 2).numpy()
-    indep_samples = independent.sample(5000, 100).reshape(-1, 2).numpy()
+    mv_samples = multivariate.generate(5000, 100).reshape(-1, 2).numpy()
+    indep_samples = independent.generate(5000, 100).reshape(-1, 2).numpy()
 
     # Compute correlations
     mv_corr = np.corrcoef(mv_samples, rowvar=False)[0, 1]
@@ -189,10 +189,10 @@ def test_multivariate_reproducibility():
 
     # Generate samples with same seed
     torch.manual_seed(42)
-    samples1 = model.sample(10, 64)
+    samples1 = model.generate(10, 64)
 
     torch.manual_seed(42)
-    samples2 = model.sample(10, 64)
+    samples2 = model.generate(10, 64)
 
     # Verify samples are identical
     assert torch.allclose(samples1, samples2)
@@ -224,10 +224,10 @@ def test_multivariate_save_load():
 
         # Verify sampling works and is identical
         torch.manual_seed(42)
-        samples1 = model.sample(5, 32)
+        samples1 = model.generate(5, 32)
 
         torch.manual_seed(42)
-        samples2 = loaded_model.sample(5, 32)
+        samples2 = loaded_model.generate(5, 32)
 
         assert torch.allclose(samples1, samples2)
 
@@ -247,11 +247,11 @@ def test_multivariate_is_statistical_model():
     # Should NOT be a DiffusionModel (no forward method)
     assert not isinstance(model, DiffusionModel)
 
-    # Should have fit and sample methods
+    # Should have fit and generate methods
     assert hasattr(model, 'fit')
-    assert hasattr(model, 'sample')
+    assert hasattr(model, 'generate')
     assert callable(model.fit)
-    assert callable(model.sample)
+    assert callable(model.generate)
 
 
 def test_multivariate_cholesky_regularization():

@@ -20,7 +20,8 @@ from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
 from tsgen.evaluation import EvaluationResult
 from tsgen.data.processor import LogReturnProcessor
-from tsgen.models.factory import create_model
+from tsgen.models.registry import ModelRegistry
+from tsgen.config.schema import ExperimentConfig
 from tsgen.tracking.base import NoOpTracker, FileTracker
 
 
@@ -231,7 +232,7 @@ def test_model_loading_consistency(minimal_config, temp_dir):
         torch.save(model.state_dict(), 'test_model.pt')
 
         # Load model
-        loaded_model = create_model(minimal_config)
+        loaded_model = ModelRegistry.create(ExperimentConfig(**minimal_config))
         loaded_model.load_state_dict(torch.load('test_model.pt', weights_only=True))
         loaded_model.eval()
 

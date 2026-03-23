@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tsgen.models.base_model import VAEModel
+from tsgen.models.registry import ModelRegistry
 
 
 class TimeVAEEncoder(nn.Module):
@@ -213,6 +214,7 @@ class TimeVAEDecoder(nn.Module):
         return recon
 
 
+@ModelRegistry.register('timevae')
 class TimeVAE(VAEModel):
     """
     TimeVAE: Variational Autoencoder for Time Series.
@@ -224,7 +226,7 @@ class TimeVAE(VAEModel):
     - forward(x) -> (reconstruction, mu, logvar)
     - encode(x) -> latent representation
     - decode(z) -> reconstruction
-    - sample(n) -> generated samples from prior
+    - generate(n) -> generated samples from prior
     """
 
     def __init__(
@@ -267,6 +269,21 @@ class TimeVAE(VAEModel):
             num_layers
         )
 
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create TimeVAE from ExperimentConfig."""
+        data = config.get_data_config()
+        params = config.get_model_params_config()
+        features = features or len(data.tickers)
+        return cls(
+            features=features,
+            sequence_length=data.sequence_length,
+            hidden_dim=params.hidden_dim,
+            latent_dim=params.latent_dim,
+            encoder_type=params.encoder_type,
+            num_layers=params.num_layers,
+        )
+
     @property
     def latent_dim(self) -> int:
         """Return dimension of the latent space."""
@@ -296,33 +313,35 @@ class TimeVAE(VAEModel):
 
         return recon, mu, logvar
 
-    def sample(self, n_samples, sequence_length=None):
+    def generate(self, n_samples, seq_len=None, device='cpu', **kwargs):
         """
         Generate samples from prior distribution.
 
         Args:
             n_samples: Number of samples to generate
-            sequence_length: Length of sequences (uses self.sequence_length if None)
+            seq_len: Length of sequences (uses self.sequence_length if None)
+            device: Device to generate on
+            **kwargs: Additional arguments (unused)
 
         Returns:
             Generated sequences (n_samples, sequence_length, features)
         """
-        if sequence_length is not None and sequence_length != self.sequence_length:
+        if seq_len is not None and seq_len != self.sequence_length:
             raise ValueError(
                 f"TimeVAE decoder is fixed to sequence_length={self.sequence_length}. "
-                f"Cannot generate sequences of length {sequence_length}."
+                f"Cannot generate sequences of length {seq_len}."
             )
 
-        device = next(self.parameters()).device
+        model_device = next(self.parameters()).device
 
         # Sample from prior N(0, I)
-        z = torch.randn(n_samples, self.latent_dim, device=device)
+        z = torch.randn(n_samples, self.latent_dim, device=model_device)
 
         # Decode
         with torch.no_grad():
             samples = self.decoder(z)
 
-        return samples
+        return samples.to(device)
 
     def encode(self, x):
         """

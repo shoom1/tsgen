@@ -7,20 +7,24 @@ This module provides implementations of various generative models:
 - MultivariateGBM: Multivariate Geometric Brownian Motion baseline
   (supports both independent and correlated sampling via full_covariance parameter)
 - BootstrapGenerativeModel: Historical bootstrap baseline
+- TimeVAE: Variational Autoencoder for time series
 """
 
 from tsgen.models.base_model import GenerativeModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
 from tsgen.models.mamba import MambaDiffusion
 from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
+from tsgen.models.timevae import TimeVAE
 from tsgen.models.diffusion import DiffusionUtils
-from tsgen.models.factory import create_model
 
 __all__ = [
     # Base class
     "GenerativeModel",
+    # Registry
+    "ModelRegistry",
     # Embeddings
     "SinusoidalPositionEmbeddings",
     # Diffusion models
@@ -28,9 +32,9 @@ __all__ = [
     "DiffusionTransformer",
     "MambaDiffusion",
     "DiffusionUtils",
+    # VAE models
+    "TimeVAE",
     # Baseline models
     "MultivariateGBM",
     "BootstrapGenerativeModel",
-    # Factory
-    "create_model",
 ]

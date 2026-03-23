@@ -1,44 +1,57 @@
+"""
+Backward-compatibility shim for create_model().
+
+DEPRECATED: Use ModelRegistry.create(config, features) instead.
+This module will be removed once train.py, evaluate.py, and
+backtest.py are migrated to use ExperimentConfig (Tasks 4-5).
+"""
+
+import warnings
+
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
 from tsgen.models.mamba import MambaDiffusion
 from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.models.timevae import TimeVAE
 
+
 def create_model(config):
     """
     Factory function to create models based on configuration.
-    
+
+    DEPRECATED: Use ModelRegistry.create(ExperimentConfig, features) instead.
+
     Args:
-        config (dict): Configuration dictionary. 
-                       Must contain 'model' key with 'type' and other parameters.
-    
+        config (dict): Configuration dictionary.
+                       Must contain 'model_type' key and other parameters.
+
     Returns:
         GenerativeModel: An instantiated model.
     """
     # Support flat config for now (backward compatibility) or nested 'model' config
     model_type = config.get('model_type', 'unet')
-    
+
     # Extract params source: check config['model']['params'] first, then config root
     params = config
     if 'model' in config and isinstance(config['model'], dict) and 'params' in config['model']:
         params = config['model']['params']
-        
+
     # Extract common params safely
     # data section might be in config['data'] or root
     data_conf = config.get('data', config)
     seq_len = data_conf.get('sequence_length')
-    
+
     features = None
     if 'tickers' in data_conf:
         features = len(data_conf['tickers'])
     # Fallback for when tickers might be in root
     if features is None and 'tickers' in config:
         features = len(config['tickers'])
-    
+
     if model_type == 'unet':
         base_channels = params.get('base_channels', 64)
         return UNet1D(sequence_length=seq_len, features=features, base_channels=base_channels)
-    
+
     elif model_type == 'transformer':
         return DiffusionTransformer(
             sequence_length=seq_len,
@@ -50,7 +63,7 @@ def create_model(config):
             dropout=params.get('dropout', 0.0),
             num_classes=params.get('num_classes', 0)
         )
-    
+
     elif model_type == 'mamba':
         return MambaDiffusion(
             sequence_length=seq_len,
@@ -62,7 +75,7 @@ def create_model(config):
             expand=params.get('expand', 2),
             num_classes=params.get('num_classes', 0)
         )
-    
+
     elif model_type == 'multivariate_gbm':
         # New unified model with configurable covariance
         full_covariance = params.get('full_covariance', True)
