@@ -191,10 +191,6 @@ class VAEModel(BaseGenerativeModel):
         """
         pass
 
-    def sample(self, n_samples: int, sequence_length: int = None) -> torch.Tensor:
-        """Backward-compatible wrapper. Use generate() instead."""
-        return self.generate(n_samples, seq_len=sequence_length)
-
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """
         Reparameterization trick: z = mu + eps * sigma
@@ -250,10 +246,6 @@ class StatisticalModel(BaseGenerativeModel):
             torch.Tensor: Generated samples (n_samples, seq_len, features)
         """
         pass
-
-    def sample(self, n_samples: int, sequence_length: int = None) -> torch.Tensor:
-        """Backward-compatible wrapper. Use generate() instead."""
-        return self.generate(n_samples, seq_len=sequence_length)
 
 
 # Backward compatibility alias

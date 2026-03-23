@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 from tsgen.cli.main import load_config, setup_experiment
 from tsgen.tracking.factory import create_tracker
 from tsgen.tracking.base import ConsoleTracker, NoOpTracker, FileTracker
+from tsgen.config.schema import ExperimentConfig
 
 
 @pytest.fixture
@@ -36,15 +37,15 @@ def sample_config_file(temp_dir):
 
 
 def test_load_config(sample_config_file):
-    """Test loading YAML configuration."""
+    """Test loading YAML configuration returns ExperimentConfig."""
     config = load_config(sample_config_file)
 
     assert config is not None
-    assert isinstance(config, dict)
-    assert config['experiment_name'] == 'test_experiment'
-    assert config['model_type'] == 'unet'
-    assert config['sequence_length'] == 64
-    assert 'tickers' in config
+    assert isinstance(config, ExperimentConfig)
+    assert config.experiment_name == 'test_experiment'
+    assert config.model_type == 'unet'
+    assert config.sequence_length == 64
+    assert config.tickers == ['AAPL', 'MSFT']
 
 
 def test_load_config_invalid_path():
@@ -114,7 +115,7 @@ def test_create_tracker_default():
 
 def test_setup_experiment_no_number():
     """Test setup_experiment returns None when no experiment number provided."""
-    config = {'experiment_name': 'test'}
+    config = ExperimentConfig(model_type='unet', experiment_name='test')
     exp_dir, model_name = setup_experiment(config, None, None)
 
     assert exp_dir is None
@@ -123,7 +124,7 @@ def test_setup_experiment_no_number():
 
 def test_setup_experiment_with_mock_manager(temp_dir):
     """Test setup_experiment with mocked ExperimentManager."""
-    config = {'experiment_name': 'test_experiment', 'model_type': 'unet'}
+    config = ExperimentConfig(model_type='unet', experiment_name='test_experiment')
 
     # Mock the ExperimentManager
     with patch('tsgen.cli.main.ExperimentManager') as MockManager:

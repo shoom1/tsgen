@@ -28,7 +28,7 @@ def load_config(config_path, validate=True):
         validate: Whether to validate config with Pydantic (default: True)
 
     Returns:
-        dict: Configuration dictionary (for backward compat with non-migrated code)
+        ExperimentConfig: Validated configuration object
 
     Raises:
         ValidationError: If config validation fails
@@ -38,9 +38,7 @@ def load_config(config_path, validate=True):
 
     if validate:
         try:
-            validated = validate_config(raw_config)
-            # Return as dict for backward compatibility with rest of codebase
-            return validated.to_dict()
+            return validate_config(raw_config)
         except ValidationError as e:
             print(f"\nConfiguration validation failed for: {config_path}")
             print("=" * 60)
@@ -50,7 +48,8 @@ def load_config(config_path, validate=True):
             print("=" * 60)
             raise
 
-    return raw_config
+    # Unvalidated path: wrap raw dict in ExperimentConfig
+    return ExperimentConfig(**raw_config)
 
 
 def setup_experiment(config, experiment_number, model_name):
@@ -58,7 +57,7 @@ def setup_experiment(config, experiment_number, model_name):
     Set up experiment folder structure for model-specific runs.
 
     Args:
-        config: Configuration dictionary
+        config: ExperimentConfig or dict
         experiment_number: Experiment number or None
         model_name: Model name for this run or None
 
@@ -72,21 +71,18 @@ def setup_experiment(config, experiment_number, model_name):
         return None, None
 
     manager = ExperimentManager()
-    
-    # Resolve experiment config section
-    exp_conf = config.get('experiment', config)
 
     # Check if experiment folder exists
     exp_path = manager.get_experiment_path(f"{experiment_number:04d}")
 
     if exp_path is None:
         # Create new experiment
-        exp_name = exp_conf.get('name', config.get('experiment_name', 'unnamed'))
+        exp_name = getattr(config, 'experiment_name', None) or 'unnamed'
         short_name = exp_name.lower().replace('-', '_').replace(' ', '_')
         parts = short_name.split('_')
         short_name = '_'.join(parts[:3]) if len(parts) > 3 else short_name
 
-        description = exp_conf.get('description', config.get('experiment_description', ''))
+        description = getattr(config, 'experiment_description', '')
         exp_path = manager.create_experiment(
             name=short_name,
             config=None,  # Don't save single config for multi-model experiments
@@ -106,15 +102,15 @@ def setup_experiment(config, experiment_number, model_name):
 
     # Determine model name
     if model_name is None:
-        # Check model section then root
-        model_conf = config.get('model', config)
-        if isinstance(model_conf, dict) and 'name' in model_conf:
-             model_name = model_conf['name']
+        model_conf = getattr(config, 'model', None)
+        if model_conf is not None and hasattr(model_conf, 'name'):
+            model_name = model_conf.name
         else:
-             model_name = config.get('model_type', 'default')
+            model_name = getattr(config, 'model_type', 'default')
 
-    # Add model config to experiment
-    manager.add_model_config(exp_path, model_name, config)
+    # Add model config to experiment (manager expects dict)
+    config_dict = config.to_dict() if hasattr(config, 'to_dict') else config
+    manager.add_model_config(exp_path, model_name, config_dict)
 
     return str(exp_path), model_name
 
@@ -181,7 +177,7 @@ def main():
                 return
 
         # Add checkpoint path to config for train.py to use
-        config['resume_from_checkpoint'] = checkpoint_path
+        config.resume_from_checkpoint = checkpoint_path
 
     if experiment_dir:
         # Experiment mode: use model-specific tracker and paths
@@ -191,8 +187,8 @@ def main():
         )
 
         # Add experiment and model info to config for use in training/evaluation
-        config['_experiment_path'] = experiment_dir
-        config['_model_name'] = model_name
+        config._experiment_path = experiment_dir
+        config._model_name = model_name
 
         print(f"Model: {model_name}")
         print(f"Log file: {os.path.join(experiment_dir, f'training_{model_name}.log')}\n")
@@ -201,18 +197,14 @@ def main():
         tracker = create_tracker(config)
 
     try:
-        exp_conf = config.get('experiment', config)
-        exp_name = exp_conf.get('name', config.get('experiment_name', 'default'))
+        exp_name = getattr(config, 'experiment_name', None) or 'default'
         tracker.start_run(run_name=f"Run_{exp_name}_{model_name or 'default'}")
 
-        # Both train_model and evaluate_model expect ExperimentConfig
-        exp_config = ExperimentConfig(**config) if isinstance(config, dict) else config
-
         if "train" in args.mode:
-            train_model(exp_config, tracker)
+            train_model(config, tracker)
 
         if "eval" in args.mode:
-            evaluate_model(exp_config, tracker)
+            evaluate_model(config, tracker)
 
         tracker.end_run()
 

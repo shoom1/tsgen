@@ -7,12 +7,19 @@ from datetime import timedelta
 import joblib
 
 # Import internal modules
-from tsgen.data.factory import create_datasource
-from tsgen.models.factory import create_model
-from tsgen.models.diffusion import DiffusionUtils
+from tsgen.data.pipeline import load_prices, clean_data
+from tsgen.models.registry import ModelRegistry
+from tsgen.models.base_model import StatisticalModel
 from tsgen.tracking.base import ConsoleTracker
 from tsgen.train import train_model
 from tsgen.config.schema import ExperimentConfig
+
+# Import model modules to trigger ModelRegistry registration
+import tsgen.models.unet
+import tsgen.models.transformer
+import tsgen.models.mamba
+import tsgen.models.baselines
+import tsgen.models.timevae
 
 
 def get_backtest_output_dir(config):
@@ -20,16 +27,12 @@ def get_backtest_output_dir(config):
     Get output directory for backtest results.
 
     Args:
-        config: Configuration dictionary
+        config: ExperimentConfig instance
 
     Returns:
         Path to output directory
     """
-    if 'output_dir' in config:
-        output_dir = config['output_dir']
-    else:
-        output_dir = "backtest_results"
-
+    output_dir = getattr(config, 'output_dir', None) or "backtest_results"
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
 
@@ -37,54 +40,55 @@ def get_backtest_output_dir(config):
 def run_backtest_experiment():
     # --- Configuration ---
     # Hardcoded for this specific experiment logic
-    SEQ_LEN = 256 
+    SEQ_LEN = 256
     N_PATHS = 1000
-    
-    base_config = {
-        'experiment_name': "Backtest_Exp",
-        'tracker': 'console',
-        'data_source_type': 'database',  # Use database source (managed by findata project)
-        'tickers': ['AAPL', 'MSFT', 'GOOG'],
-        'start_date': '2015-01-01',
-        'end_date': '2024-01-01',
-        'sequence_length': SEQ_LEN,
-        'batch_size': 32,
-        'epochs': 50,
-        'timesteps': 500,
-        'learning_rate': 1e-3,
-        'base_channels': 32,
-        'dim': 32,
-        'depth': 2,
-        'heads': 4,
-        'mlp_dim': 64,
-        'dropout': 0.0
-        # 'output_dir': 'experiments/0001_experiment/run_backtest'  # Can be set for experiment mode
-    }
+
+    base_config = ExperimentConfig(
+        experiment_name="Backtest_Exp",
+        tracker='console',
+        model_type='unet',  # placeholder, overridden per model
+        tickers=['AAPL', 'MSFT', 'GOOG'],
+        start_date='2015-01-01',
+        end_date='2024-01-01',
+        sequence_length=SEQ_LEN,
+        batch_size=32,
+        epochs=50,
+        timesteps=500,
+        learning_rate=1e-3,
+        base_channels=32,
+        dim=32,
+        depth=2,
+        heads=4,
+        # output_dir can be set for experiment mode
+    )
 
     # Get output directory for results
     output_dir = get_backtest_output_dir(base_config)
     print(f"Backtest outputs will be saved to: {output_dir}")
 
     # Define Split
-    full_end = pd.to_datetime(base_config['end_date'])
+    full_end = pd.to_datetime(base_config.end_date)
     test_start = full_end - timedelta(days=365)
     train_end = test_start
-    
+
     print(f"--- Experiment Setup ---")
-    print(f"Train Period: {base_config['start_date']} -> {train_end.strftime('%Y-%m-%d')}")
-    print(f"Test Period:  {test_start.strftime('%Y-%m-%d')} -> {base_config['end_date']}")
-    
+    print(f"Train Period: {base_config.start_date} -> {train_end.strftime('%Y-%m-%d')}")
+    print(f"Test Period:  {test_start.strftime('%Y-%m-%d')} -> {base_config.end_date}")
+
     # --- Data Preparation ---
-    ds = create_datasource(base_config)
-    df_full = ds.get_data()
-    
+    tickers = base_config.tickers
+    df_full = load_prices(
+        tickers,
+        base_config.start_date,
+        base_config.end_date,
+        column=base_config.column,
+    )
+    df_full = clean_data(df_full, strategy='ffill_drop')
+
     df_test = df_full[df_full.index >= test_start]
     if len(df_test) < SEQ_LEN:
         print(f"Warning: Test set length ({len(df_test)}) is smaller than sequence length ({SEQ_LEN}). Adjusting...")
-    
-    train_config = base_config.copy()
-    train_config['end_date'] = train_end.strftime('%Y-%m-%d')
-    
+
     models_to_test = ['gbm', 'bootstrap', 'unet', 'transformer']
     results = {}
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -93,8 +97,11 @@ def run_backtest_experiment():
     for model_type in models_to_test:
         print(f"\n>>> Processing Model: {model_type}")
 
-        curr_config = train_config.copy()
-        curr_config['model_type'] = model_type
+        # Create per-model config with training end date
+        curr_config = base_config.model_copy(update={
+            'model_type': model_type,
+            'end_date': train_end.strftime('%Y-%m-%d'),
+        })
 
         # Check if model already exists to skip training
         model_path = os.path.join(output_dir, f"{model_type}_model.pt")
@@ -111,7 +118,7 @@ def run_backtest_experiment():
         # Run Training
         tracker = ConsoleTracker()
         try:
-            train_model(ExperimentConfig(**curr_config), tracker)
+            train_model(curr_config, tracker)
         except (ValueError, RuntimeError, KeyError) as e:
             print(f"Training failed for {model_type}: {type(e).__name__}: {e}")
             continue
@@ -134,10 +141,9 @@ def run_backtest_experiment():
 
     # --- Generation Loop (All Tickers Jointly) ---
     print("\n>>> Starting Generation (Jointly)...")
-    
+
     # Store generated returns: {model_type: np.array(N_PATHS, SEQ_LEN, N_TICKERS)}
     generated_data = {}
-    tickers = base_config['tickers']
     n_tickers = len(tickers)
 
     for model_type, paths in results.items():
@@ -145,21 +151,26 @@ def run_backtest_experiment():
         try:
             loaded_obj = torch.load(paths['model_path'], map_location=device)
             processor = joblib.load(paths['processor_path'])
-            
+
+            # Build config for this model type
+            model_config = base_config.model_copy(update={
+                'model_type': model_type,
+            })
+
             # Re-instantiate or use directly
-            if isinstance(loaded_obj, dict) and not model_type in ['gbm', 'bootstrap']: 
-                model = create_model({**train_config, 'model_type': model_type}).to(device)
+            if isinstance(loaded_obj, dict) and model_type not in ['gbm', 'bootstrap']:
+                model = ModelRegistry.create(model_config, features=n_tickers).to(device)
                 model.load_state_dict(loaded_obj)
             else:
                 model = loaded_obj
-            
-            # Generate
-            if hasattr(model, 'sample'):
-                gen_seqs = model.sample(N_PATHS, SEQ_LEN).to(device)
-            else:
-                diff_utils = DiffusionUtils(T=train_config['timesteps'], device=device)
-                gen_seqs = diff_utils.sample(model, image_size=(SEQ_LEN, n_tickers), batch_size=N_PATHS)
-            
+
+            # Generate using unified generate() interface
+            gen_seqs = model.generate(
+                n_samples=N_PATHS,
+                seq_len=SEQ_LEN,
+                device=device,
+            )
+
             # Inverse Transform using DataProcessor
             gen_seqs_np = gen_seqs.cpu().numpy()  # (N, Seq, Feat)
 
@@ -185,33 +196,33 @@ def run_backtest_experiment():
     print("\n>>> Creating Plots...")
     print(f"Test Data Points: {len(df_test)}")
     real_prices = df_test.iloc[:SEQ_LEN]
-    
+
     for i, ticker in enumerate(tickers):
         plt.figure(figsize=(12, 6))
-        
+
         # 1. Plot Real Data
         real_path = real_prices[ticker].values
         if len(real_path) > 0:
             norm_real = real_path / real_path[0] * 100
             plt.plot(norm_real, label='Real (Test Data)', color='black', linewidth=2, zorder=10)
-        
+
         # 2. Plot Models
         for model_type, gen_returns in generated_data.items():
             # Specific asset returns
             asset_returns = gen_returns[:, :, i] # (N_Paths, Seq)
-            
+
             # Convert to Price Paths (Normalized start=100)
             cumulative = np.cumsum(asset_returns, axis=1)
             cumulative = np.hstack([np.zeros((N_PATHS, 1)), cumulative])
             generated_prices = 100 * np.exp(cumulative[:, :-1]) # Match length to SEQ_LEN
-            
+
             # Calculate Percentiles
             p05 = np.percentile(generated_prices, 5, axis=0)
             p50 = np.percentile(generated_prices, 50, axis=0)
             p95 = np.percentile(generated_prices, 95, axis=0)
-            
+
             color = {'gbm': 'blue', 'bootstrap': 'green', 'unet': 'orange', 'transformer': 'purple'}.get(model_type, 'gray')
-            
+
             plt.plot(p50, label=f'{model_type} Median', color=color, linestyle='--')
             plt.fill_between(range(len(p05)), p05, p95, color=color, alpha=0.15, label=f'{model_type} 90% CI')
 
