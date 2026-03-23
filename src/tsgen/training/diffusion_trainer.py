@@ -18,7 +18,6 @@ from tsgen.training.registry import TrainerRegistry
 from tsgen.training.losses import masked_mse_loss
 from tsgen.models.diffusion import DiffusionUtils
 from tsgen.analysis.metrics import calculate_stylized_facts
-from tsgen.config.schema import TrainingConfig, DiffusionConfig
 
 
 @TrainerRegistry.register('unet', 'transformer', 'mamba')
@@ -34,9 +33,9 @@ class DiffusionTrainer(BaseTrainer):
     def __init__(self, model, config, tracker, device):
         super().__init__(model, config, tracker, device)
 
-        # Parse configuration using typed config classes
-        self.training_config = TrainingConfig.from_dict(config)
-        self.diffusion_config = self._parse_diffusion_config(config)
+        # Parse configuration using typed config accessors
+        self.training_config = config.get_training_config()
+        self.diffusion_config = config.get_diffusion_config()
 
         # Diffusion utilities
         self.diff_utils = DiffusionUtils(T=self.diffusion_config.time_steps, device=device)
@@ -52,26 +51,13 @@ class DiffusionTrainer(BaseTrainer):
         self.gradient_clip = self.training_config.gradient_clip
 
         # Conditional generation settings
-        self.num_classes = config.get('num_classes', 0)
+        self.num_classes = config.get_model_params_config().num_classes
         # Probability of dropping the conditioning during training for Classifier-Free Guidance
-        self.cfg_probability = config.get('classifier_free_guidance_probability', 0.0)
+        self.cfg_probability = getattr(config, 'classifier_free_guidance_probability', 0.0)
 
         # Validation settings from config
         self.validation_interval = self.training_config.validation_interval
         self.num_validation_samples = self.training_config.num_validation_samples
-
-    def _parse_diffusion_config(self, config):
-        """Parse diffusion config from flat or nested format."""
-        diffusion_section = config.get('diffusion', {})
-        if isinstance(diffusion_section, dict) and diffusion_section:
-            return DiffusionConfig(**diffusion_section)
-
-        # Fall back to flat config
-        return DiffusionConfig(
-            time_steps=config.get('timesteps', config.get('time_steps', 1000)),
-            sampling_method=config.get('sampling_method', 'ddpm'),
-            num_inference_steps=config.get('ddim_steps', 50),
-        )
 
     def train(self, dataloader: DataLoader) -> torch.nn.Module:
         """
@@ -88,12 +74,12 @@ class DiffusionTrainer(BaseTrainer):
 
         step_count = 0
 
-        # Get feature count for validation
-        features = self.config.get('num_features', len(self.config.get('tickers', [])))
+        # Get feature count from model
+        features = self.model.features if hasattr(self.model, 'features') else len(self.config.get_data_config().tickers)
 
         # Use typed training config
         epochs = self.training_config.epochs
-        start_epoch = self.config.get('start_epoch', 0)
+        start_epoch = getattr(self.config, 'start_epoch', 0)
         checkpoint_interval = self.training_config.checkpoint_interval
 
         # Load checkpoint if resuming
@@ -246,22 +232,14 @@ class DiffusionTrainer(BaseTrainer):
                     device=self.device
                 ).long()
 
-            # Sample using DDPM or DDIM
-            if self.config.get('sampling_method', 'ddpm') == 'ddim':
-                gen_seqs = self.diff_utils.ddim_sample(
-                    self.model,
-                    image_size=(self.config['sequence_length'], features),
-                    batch_size=self.num_validation_samples,
-                    num_inference_steps=self.config.get('ddim_steps', 50),
-                    y=y_val_sampling
-                )
-            else:
-                gen_seqs = self.diff_utils.sample(
-                    self.model,
-                    image_size=(self.config['sequence_length'], features),
-                    batch_size=self.num_validation_samples,
-                    y=y_val_sampling
-                )
+            # Use model.generate() which handles DDPM/DDIM dispatch internally
+            seq_len = self.config.get_data_config().sequence_length
+            gen_seqs = self.model.generate(
+                self.num_validation_samples,
+                seq_len,
+                device=self.device,
+                y=y_val_sampling
+            )
             gen_seqs_np = gen_seqs.cpu().numpy()  # Scaled returns
 
             # 2. Prepare real data for comparison

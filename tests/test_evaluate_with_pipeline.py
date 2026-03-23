@@ -10,34 +10,35 @@ from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
 from tsgen.evaluation import EvaluationResult
 from tsgen.tracking.base import FileTracker
+from tsgen.config.schema import ExperimentConfig
 
 
 @pytest.fixture
 def pipeline_config():
     """Config with DataPipeline for both training and evaluation."""
-    return {
-        'experiment_name': 'test_eval_pipeline',
-        'model_type': 'unet',
-        'tickers': ['AAPL', 'MSFT'],
-        'start_date': '2024-01-01',
-        'end_date': '2024-12-31',
-        'sequence_length': 64,
-        'batch_size': 16,
-        'epochs': 2,
-        'timesteps': 50,
-        'learning_rate': 1e-3,
-        'base_channels': 32,
-        'num_samples': 50,  # For evaluation
+    return ExperimentConfig(
+        experiment_name='test_eval_pipeline',
+        model_type='unet',
+        tickers=['AAPL', 'MSFT'],
+        start_date='2024-01-01',
+        end_date='2024-12-31',
+        sequence_length=64,
+        batch_size=16,
+        epochs=2,
+        timesteps=50,
+        learning_rate=1e-3,
+        base_channels=32,
+        num_samples=50,  # For evaluation
 
         # data_pipeline configuration
-        'data_pipeline': [
+        data_pipeline=[
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
             {'create_windows': {'sequence_length': 64}},
             {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
         ]
-    }
+    )
 
 
 class TestEvaluateWithPipeline:
@@ -52,8 +53,8 @@ class TestEvaluateWithPipeline:
             model, processor = train_model(pipeline_config, tracker)
             assert model is not None
 
-            # Now evaluate
-            result = evaluate_model(pipeline_config, tracker)
+            # Now evaluate (evaluate_model still expects dict - Task 5)
+            result = evaluate_model(pipeline_config.to_dict(), tracker)
 
             # Verify metrics were computed
             assert result is not None

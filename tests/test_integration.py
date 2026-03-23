@@ -37,28 +37,28 @@ def temp_dir():
 @pytest.fixture
 def minimal_config():
     """Minimal configuration for quick testing."""
-    return {
-        'experiment_name': 'test_integration',
-        'data_source_type': 'database',
-        'tickers': ['AAPL', 'MSFT'],
-        'start_date': '2024-01-01',
-        'end_date': '2024-12-31',
-        'sequence_length': 64,
-        'batch_size': 16,
-        'epochs': 3,  # Just 3 epochs for speed
-        'timesteps': 100,  # Fewer timesteps for speed
-        'learning_rate': 1e-3,
-        'model_type': 'unet',
-        'base_channels': 32,
-        'tracker': 'noop',
-        'data_pipeline': [
+    return ExperimentConfig(
+        experiment_name='test_integration',
+        data_source_type='database',
+        tickers=['AAPL', 'MSFT'],
+        start_date='2024-01-01',
+        end_date='2024-12-31',
+        sequence_length=64,
+        batch_size=16,
+        epochs=3,  # Just 3 epochs for speed
+        timesteps=100,  # Fewer timesteps for speed
+        learning_rate=1e-3,
+        model_type='unet',
+        base_channels=32,
+        tracker='noop',
+        data_pipeline=[
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
             {'create_windows': {'sequence_length': 64}},
             {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
         ]
-    }
+    )
 
 
 def test_train_pipeline_unet(minimal_config, temp_dir):
@@ -83,13 +83,11 @@ def test_train_pipeline_unet(minimal_config, temp_dir):
 
 def test_train_pipeline_transformer(minimal_config, temp_dir):
     """Test training pipeline with Transformer model."""
-    # Modify config for transformer
-    config = minimal_config.copy()
-    config['model_type'] = 'transformer'
-    config['dim'] = 32
-    config['depth'] = 2
-    config['heads'] = 2
-    config['mlp_dim'] = 64
+    # Create new config for transformer
+    config = ExperimentConfig(
+        **{**minimal_config.to_dict(), 'model_type': 'transformer',
+           'dim': 32, 'depth': 2, 'heads': 2, 'mlp_dim': 64}
+    )
 
     # Create tracker with experiment directory
     tracker = FileTracker(experiment_dir=temp_dir)
@@ -114,12 +112,11 @@ def test_evaluate_pipeline(minimal_config, temp_dir):
     # First train a model
     model, processor = train_model(minimal_config, tracker)
 
-    # Now evaluate it
-    config = minimal_config.copy()
-    config['num_samples'] = 100  # Generate 100 samples for evaluation
+    # Now evaluate it (evaluate_model still expects dict - Task 5)
+    eval_dict = {**minimal_config.to_dict(), 'num_samples': 100}
 
     # Run evaluation
-    result = evaluate_model(config, tracker)
+    result = evaluate_model(eval_dict, tracker)
 
     # Verify metrics were computed
     assert result is not None
@@ -137,9 +134,7 @@ def test_evaluate_pipeline(minimal_config, temp_dir):
 def test_train_eval_end_to_end(minimal_config, temp_dir):
     """Test complete train → evaluate workflow."""
     # Configure for end-to-end test
-    config = minimal_config.copy()
-    config['epochs'] = 5
-    config['num_samples'] = 50
+    config = ExperimentConfig(**{**minimal_config.to_dict(), 'epochs': 5, 'num_samples': 50})
 
     # Create tracker with experiment directory
     tracker = FileTracker(experiment_dir=temp_dir)
@@ -154,9 +149,9 @@ def test_train_eval_end_to_end(minimal_config, temp_dir):
     assert os.path.exists(os.path.join(temp_dir, 'artifacts', 'models', 'model_final.pt'))
     assert os.path.exists(os.path.join(temp_dir, 'artifacts', 'data', 'processor.pkl'))
 
-    # Step 3: Evaluate model
+    # Step 3: Evaluate model (evaluate_model still expects dict - Task 5)
     print("\n=== Evaluating ===")
-    result = evaluate_model(config, tracker)
+    result = evaluate_model(config.to_dict(), tracker)
     assert result is not None
 
     # Step 4: Verify evaluation produced results
@@ -176,16 +171,16 @@ def test_data_pipeline_consistency(minimal_config):
 
     # Load and clean data using pipeline
     data = load_prices(
-        minimal_config['tickers'],
-        minimal_config['start_date'],
-        minimal_config['end_date']
+        minimal_config.tickers,
+        minimal_config.start_date,
+        minimal_config.end_date
     )
     data = clean_data(data)
 
     # Verify data shape
     assert data is not None
     assert len(data) > 0
-    assert data.shape[1] == len(minimal_config['tickers'])
+    assert data.shape[1] == len(minimal_config.tickers)
 
     # Create processor
     processor = LogReturnProcessor()
@@ -203,7 +198,7 @@ def test_data_pipeline_consistency(minimal_config):
 
     # Verify shapes - inverse_transform returns (Batch, Seq+1, Feat) 3D array
     # Since we passed 2D input, batch=1
-    assert reconstructed.shape == (1, len(data), len(minimal_config['tickers']))
+    assert reconstructed.shape == (1, len(data), len(minimal_config.tickers))
 
     # Verify values are reasonable (positive prices)
     assert np.all(reconstructed > 0)
@@ -222,8 +217,8 @@ def test_model_loading_consistency(minimal_config, temp_dir):
         model, processor = train_model(minimal_config, tracker)
 
         # Generate sample output
-        x = torch.randn(2, minimal_config['sequence_length'], len(minimal_config['tickers']))
-        t = torch.randint(0, minimal_config['timesteps'], (2,))
+        x = torch.randn(2, minimal_config.sequence_length, len(minimal_config.tickers))
+        t = torch.randint(0, minimal_config.timesteps, (2,))
 
         with torch.no_grad():
             output1 = model(x, t)
@@ -232,7 +227,7 @@ def test_model_loading_consistency(minimal_config, temp_dir):
         torch.save(model.state_dict(), 'test_model.pt')
 
         # Load model
-        loaded_model = ModelRegistry.create(ExperimentConfig(**minimal_config))
+        loaded_model = ModelRegistry.create(minimal_config)
         loaded_model.load_state_dict(torch.load('test_model.pt', weights_only=True))
         loaded_model.eval()
 

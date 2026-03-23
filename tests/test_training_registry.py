@@ -10,6 +10,7 @@ from tsgen.training import (
     BaselineTrainer
 )
 from tsgen.tracking.base import NoOpTracker
+from tsgen.config.schema import ExperimentConfig
 
 
 def test_registry_lists_all_trainers():
@@ -23,19 +24,20 @@ def test_registry_lists_all_trainers():
     assert 'gbm' in trainers
     assert 'bootstrap' in trainers
     assert 'multivariate_lognormal' in trainers
+    assert 'multivariate_gbm' in trainers
 
 
 def test_registry_get_diffusion_trainer():
     """Test getting diffusion trainer from registry."""
     model = torch.nn.Linear(10, 10)
-    config = {
-        'model_type': 'unet',
-        'epochs': 1,
-        'timesteps': 10,
-        'learning_rate': 1e-3,
-        'sequence_length': 10,
-        'tickers': ['A']
-    }
+    config = ExperimentConfig(
+        model_type='unet',
+        epochs=1,
+        timesteps=10,
+        learning_rate=1e-3,
+        sequence_length=10,
+        tickers=['A']
+    )
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('unet', model, config, tracker, 'cpu')
@@ -47,7 +49,7 @@ def test_registry_get_vae_trainer():
     """Test getting VAE trainer from registry."""
     from tsgen.models.timevae import TimeVAE
     model = TimeVAE(features=2, sequence_length=32, latent_dim=8, hidden_dim=16)
-    config = {'model_type': 'timevae', 'epochs': 1, 'learning_rate': 1e-3}
+    config = ExperimentConfig(model_type='timevae', epochs=1, learning_rate=1e-3)
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('timevae', model, config, tracker, 'cpu')
@@ -58,7 +60,7 @@ def test_registry_get_baseline_trainer():
     """Test getting baseline trainer from registry."""
     from tsgen.models.baselines import MultivariateGBM
     model = MultivariateGBM(features=2)
-    config = {'model_type': 'gbm', 'epochs': 1}
+    config = ExperimentConfig(model_type='gbm', epochs=1)
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('gbm', model, config, tracker, 'cpu')
@@ -68,7 +70,7 @@ def test_registry_get_baseline_trainer():
 def test_registry_unknown_model_type_raises():
     """Test that unknown model type raises ValueError."""
     model = torch.nn.Linear(10, 10)
-    config = {'model_type': 'unknown'}
+    config = ExperimentConfig(model_type='unknown')
     tracker = NoOpTracker()
 
     with pytest.raises(ValueError, match="No trainer registered"):
@@ -83,10 +85,11 @@ def test_trainer_decorator_registers_multiple_types():
     assert trainers['unet'] == DiffusionTrainer
     assert trainers['transformer'] == DiffusionTrainer
 
-    # BaselineTrainer registered for all three
+    # BaselineTrainer registered for all
     assert trainers['gbm'] == BaselineTrainer
     assert trainers['bootstrap'] == BaselineTrainer
     assert trainers['multivariate_lognormal'] == BaselineTrainer
+    assert trainers['multivariate_gbm'] == BaselineTrainer
 
 
 def test_trainer_has_common_interface():
@@ -102,9 +105,12 @@ def test_trainer_has_common_interface():
     device = 'cpu'
 
     # Create trainers
-    diff_config = {'model_type': 'unet', 'epochs': 1, 'timesteps': 10, 'learning_rate': 1e-3, 'sequence_length': 10, 'tickers': ['A']}
-    vae_config = {'model_type': 'timevae', 'epochs': 1, 'learning_rate': 1e-3}
-    baseline_config = {'model_type': 'gbm', 'epochs': 1}
+    diff_config = ExperimentConfig(
+        model_type='unet', epochs=1, timesteps=10,
+        learning_rate=1e-3, sequence_length=10, tickers=['A']
+    )
+    vae_config = ExperimentConfig(model_type='timevae', epochs=1, learning_rate=1e-3)
+    baseline_config = ExperimentConfig(model_type='gbm', epochs=1)
 
     diff_trainer = TrainerRegistry.get_trainer('unet', diff_model, diff_config, tracker, device)
     vae_trainer = TrainerRegistry.get_trainer('timevae', vae_model, vae_config, tracker, device)
@@ -124,14 +130,14 @@ def test_trainer_has_common_interface():
 def test_trainer_stores_config_and_model():
     """Test that trainers store references to model and config."""
     model = torch.nn.Linear(10, 10)
-    config = {
-        'model_type': 'unet',
-        'epochs': 1,
-        'timesteps': 10,
-        'learning_rate': 1e-3,
-        'sequence_length': 10,
-        'tickers': ['A']
-    }
+    config = ExperimentConfig(
+        model_type='unet',
+        epochs=1,
+        timesteps=10,
+        learning_rate=1e-3,
+        sequence_length=10,
+        tickers=['A']
+    )
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('unet', model, config, tracker, 'cpu')

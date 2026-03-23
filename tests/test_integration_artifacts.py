@@ -16,32 +16,33 @@ from pathlib import Path
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
 from tsgen.tracking.base import FileTracker
+from tsgen.config.schema import ExperimentConfig
 
 
 @pytest.fixture
 def minimal_config():
     """Minimal config for fast testing."""
-    return {
-        'model_type': 'unet',
-        'tickers': ['AAPL', 'MSFT'],
-        'start_date': '2023-01-01',
-        'end_date': '2023-12-31',
-        'sequence_length': 64,
-        'batch_size': 16,
-        'epochs': 3,
-        'timesteps': 100,
-        'learning_rate': 1e-3,
-        'in_channels': 2,
-        'channels': 32,
-        'tracker': 'file',
-        'data_pipeline': [
+    return ExperimentConfig(
+        model_type='unet',
+        tickers=['AAPL', 'MSFT'],
+        start_date='2023-01-01',
+        end_date='2023-12-31',
+        sequence_length=64,
+        batch_size=16,
+        epochs=3,
+        timesteps=100,
+        learning_rate=1e-3,
+        in_channels=2,
+        channels=32,
+        tracker='file',
+        data_pipeline=[
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
             {'create_windows': {'sequence_length': 64}},
             {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
         ]
-    }
+    )
 
 
 def test_no_artifact_duplication(minimal_config):
@@ -74,8 +75,7 @@ def test_checkpoint_organization(minimal_config):
     """Verify checkpoints are organized correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Use more epochs to trigger checkpoint saving
-        config = minimal_config.copy()
-        config['epochs'] = 10
+        config = ExperimentConfig(**{**minimal_config.to_dict(), 'epochs': 10})
 
         tracker = FileTracker(experiment_dir=tmpdir)
 
@@ -105,9 +105,8 @@ def test_plot_organization(minimal_config):
         # Train and evaluate to generate plots
         train_model(minimal_config, tracker)
 
-        config = minimal_config.copy()
-        config['num_samples'] = 50  # Small number for fast testing
-        evaluate_model(config, tracker)
+        eval_dict = {**minimal_config.to_dict(), 'num_samples': 50}
+        evaluate_model(eval_dict, tracker)
 
         # Check plot locations
         plots_dir = Path(tmpdir) / 'artifacts' / 'plots'
@@ -133,13 +132,11 @@ def test_typed_subdirectories_complete(minimal_config):
         tracker = FileTracker(experiment_dir=tmpdir)
 
         # Train model (creates models, data, checkpoints)
-        config = minimal_config.copy()
-        config['epochs'] = 10
+        config = ExperimentConfig(**{**minimal_config.to_dict(), 'epochs': 10})
         train_model(config, tracker)
 
-        # Evaluate model (creates plots)
-        config['num_samples'] = 50
-        evaluate_model(config, tracker)
+        # Evaluate model (creates plots) - evaluate_model still expects dict (Task 5)
+        evaluate_model({**config.to_dict(), 'num_samples': 50}, tracker)
 
         artifacts_dir = Path(tmpdir) / 'artifacts'
 
@@ -201,8 +198,7 @@ def test_multiple_training_runs_no_interference(minimal_config):
         first_model_size = (artifacts_dir / 'models' / 'model_final.pt').stat().st_size
 
         # Second training run (should overwrite)
-        config = minimal_config.copy()
-        config['epochs'] = 5  # Different epochs
+        config = ExperimentConfig(**{**minimal_config.to_dict(), 'epochs': 5})
         train_model(config, tracker)
 
         # Verify second run artifacts exist

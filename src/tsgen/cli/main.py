@@ -16,6 +16,7 @@ from tsgen.tracking.base import FileTracker
 from tsgen.experiments.manager import ExperimentManager
 from tsgen.training.checkpoint_utils import get_checkpoint_path, list_checkpoints
 from tsgen.config import validate_config
+from tsgen.config.schema import ExperimentConfig
 
 
 def load_config(config_path, validate=True):
@@ -27,7 +28,7 @@ def load_config(config_path, validate=True):
         validate: Whether to validate config with Pydantic (default: True)
 
     Returns:
-        dict: Configuration dictionary (validated if validate=True)
+        dict: Configuration dictionary (for backward compat with non-migrated code)
 
     Raises:
         ValidationError: If config validation fails
@@ -205,10 +206,13 @@ def main():
         tracker.start_run(run_name=f"Run_{exp_name}_{model_name or 'default'}")
 
         if "train" in args.mode:
-            train_model(config, tracker)
+            # train_model expects ExperimentConfig
+            train_config = ExperimentConfig(**config) if isinstance(config, dict) else config
+            train_model(train_config, tracker)
 
         if "eval" in args.mode:
-            evaluate_model(config, tracker)
+            # evaluate_model still expects dict (will be converted in Task 5)
+            evaluate_model(config if isinstance(config, dict) else config.to_dict(), tracker)
 
         tracker.end_run()
 

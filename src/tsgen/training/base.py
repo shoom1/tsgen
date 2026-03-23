@@ -25,7 +25,7 @@ class BaseTrainer(ABC):
     def __init__(
         self,
         model: torch.nn.Module,
-        config: Dict[str, Any],
+        config,
         tracker: ExperimentTracker,
         device: str
     ):
@@ -34,7 +34,7 @@ class BaseTrainer(ABC):
 
         Args:
             model: Model instance to train
-            config: Configuration dictionary containing hyperparameters
+            config: ExperimentConfig (or dict for backward compatibility)
             tracker: Experiment tracker for logging metrics and artifacts
             device: Device to train on ('cuda' or 'cpu')
         """
@@ -85,7 +85,7 @@ class BaseTrainer(ABC):
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
-            'config': self.config,
+            'config': self.config.to_dict() if hasattr(self.config, 'to_dict') else self.config,
         }
 
         if optimizer is not None:

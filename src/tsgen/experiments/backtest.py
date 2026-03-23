@@ -12,6 +12,7 @@ from tsgen.models.factory import create_model
 from tsgen.models.diffusion import DiffusionUtils
 from tsgen.tracking.base import ConsoleTracker
 from tsgen.train import train_model
+from tsgen.config.schema import ExperimentConfig
 
 
 def get_backtest_output_dir(config):
@@ -110,7 +111,7 @@ def run_backtest_experiment():
         # Run Training
         tracker = ConsoleTracker()
         try:
-            train_model(curr_config, tracker)
+            train_model(ExperimentConfig(**curr_config), tracker)
         except (ValueError, RuntimeError, KeyError) as e:
             print(f"Training failed for {model_type}: {type(e).__name__}: {e}")
             continue
