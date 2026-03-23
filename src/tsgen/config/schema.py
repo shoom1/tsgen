@@ -201,6 +201,9 @@ class ExperimentConfig(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     sequence_length: int = 64
+    column: str = 'adj_close'
+    db_path: Optional[str] = None
+    train_test_split: Optional[float] = None
     batch_size: int = 32
     epochs: int = 100
     learning_rate: float = 1e-3
@@ -245,6 +248,9 @@ class ExperimentConfig(BaseModel):
             start_date=self.start_date,
             end_date=self.end_date,
             sequence_length=self.sequence_length,
+            column=self.column,
+            db_path=self.db_path,
+            train_test_split=self.train_test_split,
         )
 
     def get_training_config(self) -> TrainingConfig:
@@ -264,6 +270,19 @@ class ExperimentConfig(BaseModel):
             return self.diffusion
 
         return DiffusionConfig(time_steps=self.timesteps)
+
+    def get_model_params_config(self) -> ModelParamsConfig:
+        """Get unified ModelParamsConfig from nested or flat fields."""
+        if self.model:
+            return self.model
+
+        return ModelParamsConfig(
+            base_channels=self.base_channels,
+            dim=self.dim,
+            depth=self.depth,
+            heads=self.heads,
+            num_classes=self.num_classes,
+        )
 
     def get_evaluation_config(self) -> EvaluationConfig:
         """Get EvaluationConfig with defaults."""
