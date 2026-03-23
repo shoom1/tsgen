@@ -93,8 +93,8 @@ model_final.pt
 diffusion_model_final.pt
 processor.pkl
 
-# Data files
-data/
+# Data files (root-level only, not src/tsgen/data/)
+/data/
 *.csv
 *.parquet
 *.db
