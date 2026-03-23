@@ -28,7 +28,6 @@ from tsgen.evaluation.evaluators import (
     DistributionTestEvaluator,
     DiscriminatorEvaluator,
     TSTREvaluator,
-    CompositeEvaluator,
     create_default_evaluators,
 )
 from tsgen.evaluation.pipeline import (
@@ -45,7 +44,6 @@ __all__ = [
     'DistributionTestEvaluator',
     'DiscriminatorEvaluator',
     'TSTREvaluator',
-    'CompositeEvaluator',
     # Factory
     'create_default_evaluators',
     # Pipeline

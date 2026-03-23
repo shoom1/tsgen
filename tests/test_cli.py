@@ -146,7 +146,7 @@ def test_create_tracker_mlflow():
     config = {'tracker': 'mlflow', 'experiment_name': 'test'}
 
     # Mock MLFlowTracker to avoid MLflow dependencies in tests
-    with patch('tsgen.tracking.factory.MLFlowTracker') as MockMLFlow:
+    with patch('tsgen.tracking.mlflow_tracker.MLFlowTracker') as MockMLFlow:
         mock_tracker = MagicMock()
         MockMLFlow.return_value = mock_tracker
 

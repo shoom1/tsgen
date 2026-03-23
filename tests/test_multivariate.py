@@ -12,6 +12,8 @@ from tsgen.models.baselines import MultivariateGBM
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def synthetic_dataloader():

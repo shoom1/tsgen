@@ -151,32 +151,6 @@ def vae_loss(recon, x, mu, logvar, beta=1.0):
     return total_loss, recon_loss, kl_loss
 
 
-def vae_loss_with_annealing(recon, x, mu, logvar, beta_schedule, epoch):
-    """
-    VAE loss with KL annealing schedule.
-
-    Gradually increases beta from 0 to 1 over training to prevent
-    posterior collapse.
-
-    Args:
-        recon: Reconstructed data (Batch, Seq, Features)
-        x: Original data (Batch, Seq, Features)
-        mu: Mean of latent distribution (Batch, latent_dim)
-        logvar: Log-variance of latent distribution (Batch, latent_dim)
-        beta_schedule: Function that maps epoch -> beta value
-        epoch: Current epoch number
-
-    Returns:
-        total_loss: Combined loss (scalar)
-        recon_loss: Reconstruction loss component (scalar)
-        kl_loss: KL divergence component (scalar)
-        current_beta: Beta value used (for logging)
-    """
-    beta = beta_schedule(epoch)
-    total_loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar, beta)
-    return total_loss, recon_loss, kl_loss, beta
-
-
 def vae_loss_with_free_bits(recon, x, mu, logvar, beta=1.0, free_bits=0.5):
     """
     VAE loss with free bits constraint to prevent posterior collapse.

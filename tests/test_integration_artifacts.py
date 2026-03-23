@@ -13,6 +13,8 @@ import os
 import tempfile
 from pathlib import Path
 
+pytestmark = pytest.mark.integration
+
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
 from tsgen.tracking.base import FileTracker

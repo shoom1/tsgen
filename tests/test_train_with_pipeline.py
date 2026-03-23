@@ -14,6 +14,8 @@ from tsgen.train import train_model
 from tsgen.tracking.base import FileTracker
 from tsgen.config.schema import ExperimentConfig
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def pipeline_config():
