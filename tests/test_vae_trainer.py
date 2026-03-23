@@ -10,7 +10,7 @@ import os
 from tsgen.training import VAETrainer
 from tsgen.models.timevae import TimeVAE
 from tsgen.tracking.base import NoOpTracker, ConsoleTracker
-from tsgen.models.losses import vae_loss, VAELossTracker, linear_beta_schedule
+from tsgen.training.losses import vae_loss, VAELossTracker, linear_beta_schedule
 
 
 @pytest.fixture

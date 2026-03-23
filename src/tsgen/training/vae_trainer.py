@@ -13,13 +13,14 @@ from torch.utils.data import DataLoader
 
 from tsgen.training.base import BaseTrainer
 from tsgen.training.registry import TrainerRegistry
-from tsgen.models.losses import (
+from tsgen.training.losses import (
     vae_loss,
     vae_loss_with_free_bits,
     VAELossTracker,
     VAEDiagnostics,
     linear_beta_schedule
 )
+from tsgen.config.schema import TrainingConfig
 
 
 @TrainerRegistry.register('timevae')
@@ -38,15 +39,18 @@ class VAETrainer(BaseTrainer):
     def __init__(self, model, config, tracker, device):
         super().__init__(model, config, tracker, device)
 
-        # Resolve configuration sections
-        training_conf = config.get('training', config)
+        # Parse configuration using typed config class
+        self.training_config = TrainingConfig.from_dict(config)
 
-        # Optimizer
-        learning_rate = training_conf.get('learning_rate', 1e-3)
+        # Optimizer with config-driven learning rate
         self.optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=float(learning_rate)
+            lr=self.training_config.learning_rate
         )
+
+        # Gradient clipping threshold from config
+        self.gradient_clip = self.training_config.gradient_clip
+        self.checkpoint_interval = self.training_config.checkpoint_interval
 
         # VAE-specific hyperparameters
         self.beta = config.get('vae_beta', 0.5)
@@ -56,8 +60,8 @@ class VAETrainer(BaseTrainer):
         self.free_bits = config.get('vae_free_bits', 0.5)
         self.teacher_forcing_ratio = config.get('vae_teacher_forcing_ratio', 0.5)
 
-        # Beta annealing schedule
-        epochs = training_conf.get('epochs', 10)
+        # Beta annealing schedule using typed epochs
+        epochs = self.training_config.epochs
         if self.use_annealing:
             self.beta_schedule = linear_beta_schedule(
                 max_epochs=epochs,
@@ -96,9 +100,8 @@ class VAETrainer(BaseTrainer):
 
         step_count = 0
 
-        # Get epochs from training section
-        training_conf = self.config.get('training', self.config)
-        epochs = training_conf.get('epochs', 10)
+        # Use typed training config
+        epochs = self.training_config.epochs
         start_epoch = self.config.get('start_epoch', 0)
 
         # Load checkpoint if resuming
@@ -137,7 +140,7 @@ class VAETrainer(BaseTrainer):
                     # Backward pass
                     self.optimizer.zero_grad()
                     total_loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
                     self.optimizer.step()
 
                     # Track losses
@@ -198,7 +201,7 @@ class VAETrainer(BaseTrainer):
                 }, step=step_count)
 
                 # Checkpointing - save full checkpoint with optimizer state
-                if (epoch + 1) % 10 == 0 or epoch == epochs - 1:
+                if (epoch + 1) % self.checkpoint_interval == 0 or epoch == epochs - 1:
                     ckpt_filename = f"checkpoint_epoch_{epoch+1}.pt"
                     ckpt_path = os.path.join(tmpdir, ckpt_filename)
                     self.save_checkpoint(

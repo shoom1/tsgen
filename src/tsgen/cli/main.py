@@ -7,16 +7,49 @@ import os
 import warnings
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
 from tsgen.tracking.factory import create_tracker
 from tsgen.tracking.base import FileTracker
 from tsgen.experiments.manager import ExperimentManager
 from tsgen.training.checkpoint_utils import get_checkpoint_path, list_checkpoints
+from tsgen.config import validate_config
 
-def load_config(config_path):
+
+def load_config(config_path, validate=True):
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML config file
+        validate: Whether to validate config with Pydantic (default: True)
+
+    Returns:
+        dict: Configuration dictionary (validated if validate=True)
+
+    Raises:
+        ValidationError: If config validation fails
+    """
     with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+        raw_config = yaml.safe_load(f)
+
+    if validate:
+        try:
+            validated = validate_config(raw_config)
+            # Return as dict for backward compatibility with rest of codebase
+            return validated.to_dict()
+        except ValidationError as e:
+            print(f"\nConfiguration validation failed for: {config_path}")
+            print("=" * 60)
+            for error in e.errors():
+                loc = ' -> '.join(str(x) for x in error['loc'])
+                print(f"  {loc}: {error['msg']}")
+            print("=" * 60)
+            raise
+
+    return raw_config
 
 
 def setup_experiment(config, experiment_number, model_name):

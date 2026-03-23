@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tsgen.models.base_model import GenerativeModel
+from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
 
 class Block1D(nn.Module):
@@ -26,7 +26,7 @@ class Block1D(nn.Module):
         h = self.relu(h)
         return h
 
-class UNet1D(GenerativeModel):
+class UNet1D(DiffusionModel):
     def __init__(self, sequence_length, features, base_channels=64):
         super().__init__()
         self.time_dim = base_channels * 4
@@ -46,7 +46,7 @@ class UNet1D(GenerativeModel):
         self.up2 = Block1D(base_channels * 2 + base_channels, base_channels, self.time_dim)
         self.final_conv = nn.Conv1d(base_channels, features, kernel_size=1)
 
-    def forward(self, x, t, y=None):
+    def forward(self, x, t, y=None, mask=None):
         """
         Forward pass for UNet1D.
 
@@ -54,11 +54,13 @@ class UNet1D(GenerativeModel):
             x: Input tensor (Batch, Seq_Len, Features)
             t: Timesteps (Batch,)
             y: Optional class labels (Batch,) - not used by UNet, for API compatibility
+            mask: Optional binary mask (Batch, Seq_Len, Features) - not used by UNet
+                  (UNet uses convolutions which don't support attention-style masking)
 
         Returns:
             Predicted noise (Batch, Seq_Len, Features)
         """
-        # Note: UNet doesn't use class conditioning (y), parameter added for API compatibility
+        # Note: UNet doesn't use class conditioning (y) or mask, parameters added for API compatibility
         x = x.transpose(1, 2)
         t = self.time_mlp(t)
         x1 = self.down1(x, t)

@@ -18,7 +18,7 @@ learning_rate: 1e-3
 base_channels: 32
 
 # Minimal pipeline - uses all defaults
-DataPipeline:
+data_pipeline:
   - load_prices: {}      # All params from runtime (tickers, dates)
   - clean_data: {}       # Default strategy='ffill_drop'
   - process_prices: {}   # Uses processor from runtime, fit from runtime

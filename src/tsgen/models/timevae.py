@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tsgen.models.base_model import VAEModel
+
 
 class TimeVAEEncoder(nn.Module):
     """
@@ -211,13 +213,20 @@ class TimeVAEDecoder(nn.Module):
         return recon
 
 
-class TimeVAE(nn.Module):
+class TimeVAE(VAEModel):
     """
     TimeVAE: Variational Autoencoder for Time Series.
 
     Combines encoder and decoder with reparameterization trick for
     learning latent representations of time series data.
+
+    Inherits from VAEModel which provides the standard VAE interface:
+    - forward(x) -> (reconstruction, mu, logvar)
+    - encode(x) -> latent representation
+    - decode(z) -> reconstruction
+    - sample(n) -> generated samples from prior
     """
+
     def __init__(
         self,
         features,
@@ -239,7 +248,7 @@ class TimeVAE(nn.Module):
         super().__init__()
         self.features = features
         self.sequence_length = sequence_length
-        self.latent_dim = latent_dim
+        self._latent_dim = latent_dim  # Store as private attribute
         self.encoder_type = encoder_type
 
         self.encoder = TimeVAEEncoder(
@@ -258,20 +267,10 @@ class TimeVAE(nn.Module):
             num_layers
         )
 
-    def reparameterize(self, mu, logvar):
-        """
-        Reparameterization trick: z = mu + eps * sigma
-
-        Args:
-            mu: Mean of latent distribution (Batch, latent_dim)
-            logvar: Log-variance of latent distribution (Batch, latent_dim)
-
-        Returns:
-            z: Sampled latent variable (Batch, latent_dim)
-        """
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+    @property
+    def latent_dim(self) -> int:
+        """Return dimension of the latent space."""
+        return self._latent_dim
 
     def forward(self, x, teacher_forcing_ratio=0.5):
         """

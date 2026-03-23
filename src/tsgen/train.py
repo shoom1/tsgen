@@ -4,7 +4,7 @@ Main training module with Trainer Registry Pattern.
 Uses Strategy + Registry + Factory patterns to dispatch to appropriate
 trainer based on model type.
 
-Data pipeline is configured via YAML using the DataPipeline key.
+Data pipeline is configured via YAML using the data_pipeline key.
 """
 
 import torch
@@ -31,7 +31,7 @@ def train_model(config, tracker: ExperimentTracker):
     based on model type. Supports diffusion models (UNet, Transformer),
     VAE models (TimeVAE), and baseline models (GBM, Bootstrap, etc.).
 
-    Data pipeline is configured via YAML using config['DataPipeline'].
+    Data pipeline is configured via YAML using config['data_pipeline'].
 
     Args:
         config: Configuration dictionary containing hyperparameters

@@ -19,7 +19,7 @@ base_channels: 64
 
 # Advanced pipeline with temporal split
 # This trains only on 80% of data (proper out-of-sample validation)
-DataPipeline:
+data_pipeline:
   # Load full dataset
   - load_prices:
       column: 'adj_close'

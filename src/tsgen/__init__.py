@@ -10,9 +10,11 @@ __version__ = "0.1.0"
 # Import key functions for easy access
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
+from tsgen.evaluation import EvaluationResult
 
 __all__ = [
     "train_model",
     "evaluate_model",
+    "EvaluationResult",
     "__version__",
 ]

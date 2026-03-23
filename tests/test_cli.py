@@ -215,7 +215,7 @@ class TestMainCLI:
                     with patch('tsgen.cli.main.create_tracker') as mock_create_tracker:
                         mock_tracker = MagicMock()
                         mock_create_tracker.return_value = mock_tracker
-                        mock_eval.return_value = {'discriminator_accuracy': 0.5}
+                        mock_eval.return_value = MagicMock()
 
                         from tsgen.cli.main import main
                         main()
@@ -238,7 +238,7 @@ class TestMainCLI:
                             mock_tracker = MagicMock()
                             mock_create_tracker.return_value = mock_tracker
                             mock_train.return_value = (MagicMock(), MagicMock())
-                            mock_eval.return_value = {'discriminator_accuracy': 0.5}
+                            mock_eval.return_value = MagicMock()
 
                             from tsgen.cli.main import main
                             main()

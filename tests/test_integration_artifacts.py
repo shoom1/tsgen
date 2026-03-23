@@ -34,7 +34,7 @@ def minimal_config():
         'in_channels': 2,
         'channels': 32,
         'tracker': 'file',
-        'DataPipeline': [
+        'data_pipeline': [
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},

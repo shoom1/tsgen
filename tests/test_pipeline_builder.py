@@ -240,7 +240,7 @@ class TestPipelineFromConfig:
     def test_from_config_simple(self):
         """Test building pipeline from simple config."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}}
             ]
@@ -257,7 +257,7 @@ class TestPipelineFromConfig:
     def test_from_config_full_pipeline(self):
         """Test building full data pipeline from config."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}},
                 {'process_prices': {'fit': True}},
@@ -276,7 +276,7 @@ class TestPipelineFromConfig:
     def test_from_config_empty_params(self):
         """Test step with empty params dict."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {}},  # Empty params
                 {'clean_data': None}   # None params
             ]
@@ -288,15 +288,15 @@ class TestPipelineFromConfig:
         assert pipeline.steps[1].params == {}
 
     def test_from_config_missing_pipeline_key(self):
-        """Test that missing DataPipeline key raises ValueError."""
-        config = {}  # No 'DataPipeline' key
+        """Test that missing data_pipeline key raises ValueError."""
+        config = {}  # No 'data_pipeline' key
 
         with pytest.raises(ValueError, match="No pipeline steps defined"):
             DataPipeline.from_config(config)
 
     def test_from_config_empty_pipeline(self):
-        """Test that empty DataPipeline list raises ValueError."""
-        config = {'DataPipeline': []}  # Empty list
+        """Test that empty data_pipeline list raises ValueError."""
+        config = {'data_pipeline': []}  # Empty list
 
         with pytest.raises(ValueError, match="No pipeline steps defined"):
             DataPipeline.from_config(config)
@@ -304,7 +304,7 @@ class TestPipelineFromConfig:
     def test_from_config_invalid_step_format(self):
         """Test that invalid step format raises ValueError."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 'invalid_string',  # Should be dict
             ]
         }
@@ -315,7 +315,7 @@ class TestPipelineFromConfig:
     def test_from_config_multiple_keys_per_step(self):
         """Test that step with multiple keys raises ValueError."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {}, 'clean_data': {}}  # Two keys!
             ]
         }
@@ -326,7 +326,7 @@ class TestPipelineFromConfig:
     def test_from_config_unknown_step(self):
         """Test that unknown step name raises ValueError."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'unknown_step': {}}
             ]
         }
@@ -397,7 +397,7 @@ class TestPipelineIntegration:
     def test_minimal_pipeline_execution(self):
         """Test executing minimal real pipeline."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}},
             ]
@@ -419,7 +419,7 @@ class TestPipelineIntegration:
     def test_full_pipeline_execution(self):
         """Test executing full data pipeline."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}},
                 {'process_prices': {'fit': True}},
@@ -449,7 +449,7 @@ class TestPipelineIntegration:
     def test_pipeline_error_handling(self):
         """Test that pipeline errors provide context."""
         config = {
-            'DataPipeline': [
+            'data_pipeline': [
                 {'load_prices': {}},  # Missing required params
             ]
         }

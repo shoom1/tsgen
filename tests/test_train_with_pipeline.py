@@ -31,8 +31,8 @@ def pipeline_config():
         'base_channels': 32,
         'tracker': 'file',
 
-        # DataPipeline configuration
-        'DataPipeline': [
+        # data_pipeline configuration
+        'data_pipeline': [
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
@@ -46,7 +46,7 @@ class TestTrainWithPipeline:
     """Tests for training with YAML-configured pipeline."""
 
     def test_train_with_pipeline_config(self, pipeline_config):
-        """Test that training works with DataPipeline config."""
+        """Test that training works with data_pipeline config."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = FileTracker(experiment_dir=tmpdir)
 
@@ -79,8 +79,8 @@ class TestTrainWithPipeline:
             'learning_rate': 1e-3,
             'base_channels': 32,
 
-            # DataPipeline with split_temporal step
-            'DataPipeline': [
+            # data_pipeline with split_temporal step
+            'data_pipeline': [
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}},
                 {'split_temporal': {'train_ratio': 0.8}},

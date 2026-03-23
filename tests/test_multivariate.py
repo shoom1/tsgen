@@ -235,18 +235,23 @@ def test_multivariate_save_load():
         os.unlink(temp_path)
 
 
-def test_multivariate_forward():
-    """Test forward method (should return zeros for baselines)."""
+def test_multivariate_is_statistical_model():
+    """Test that MultivariateGBM is a StatisticalModel (not DiffusionModel)."""
+    from tsgen.models.base_model import StatisticalModel, DiffusionModel
+
     model = MultivariateGBM(features=2)
 
-    x = torch.randn(4, 64, 2)
-    t = torch.randint(0, 500, (4,))
+    # Should be a StatisticalModel
+    assert isinstance(model, StatisticalModel)
 
-    output = model.forward(x, t)
+    # Should NOT be a DiffusionModel (no forward method)
+    assert not isinstance(model, DiffusionModel)
 
-    # Should return zeros (baseline models don't use forward)
-    assert output.shape == x.shape
-    assert torch.allclose(output, torch.zeros_like(x))
+    # Should have fit and sample methods
+    assert hasattr(model, 'fit')
+    assert hasattr(model, 'sample')
+    assert callable(model.fit)
+    assert callable(model.sample)
 
 
 def test_multivariate_cholesky_regularization():

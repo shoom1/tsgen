@@ -8,6 +8,7 @@ import tempfile
 
 from tsgen.train import train_model
 from tsgen.evaluate import evaluate_model
+from tsgen.evaluation import EvaluationResult
 from tsgen.tracking.base import FileTracker
 
 
@@ -28,8 +29,8 @@ def pipeline_config():
         'base_channels': 32,
         'num_samples': 50,  # For evaluation
 
-        # DataPipeline configuration
-        'DataPipeline': [
+        # data_pipeline configuration
+        'data_pipeline': [
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
@@ -40,10 +41,10 @@ def pipeline_config():
 
 
 class TestEvaluateWithPipeline:
-    """Tests for evaluation with DataPipeline configuration."""
+    """Tests for evaluation with data_pipeline configuration."""
 
     def test_evaluate_with_pipeline_config(self, pipeline_config):
-        """Test that evaluation works with DataPipeline config."""
+        """Test that evaluation works with data_pipeline config."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = FileTracker(experiment_dir=tmpdir)
 
@@ -52,12 +53,12 @@ class TestEvaluateWithPipeline:
             assert model is not None
 
             # Now evaluate
-            metrics = evaluate_model(pipeline_config, tracker)
+            result = evaluate_model(pipeline_config, tracker)
 
             # Verify metrics were computed
-            assert metrics is not None
-            assert isinstance(metrics, dict)
-            assert 'discriminator_accuracy' in metrics
+            assert result is not None
+            assert isinstance(result, EvaluationResult)
+            assert 'discriminator_accuracy' in result.metrics
 
 
 if __name__ == "__main__":

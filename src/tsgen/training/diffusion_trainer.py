@@ -15,8 +15,10 @@ from torch.utils.data import DataLoader
 
 from tsgen.training.base import BaseTrainer
 from tsgen.training.registry import TrainerRegistry
+from tsgen.training.losses import masked_mse_loss
 from tsgen.models.diffusion import DiffusionUtils
 from tsgen.analysis.metrics import calculate_stylized_facts
+from tsgen.config.schema import TrainingConfig, DiffusionConfig
 
 
 @TrainerRegistry.register('unet', 'transformer', 'mamba')
@@ -32,31 +34,44 @@ class DiffusionTrainer(BaseTrainer):
     def __init__(self, model, config, tracker, device):
         super().__init__(model, config, tracker, device)
 
-        # Resolve configuration sections
-        diffusion_conf = config.get('diffusion', config)
-        training_conf = config.get('training', config)
+        # Parse configuration using typed config classes
+        self.training_config = TrainingConfig.from_dict(config)
+        self.diffusion_config = self._parse_diffusion_config(config)
 
         # Diffusion utilities
-        # Support both 'time_steps' (new) and 'timesteps' (old)
-        timesteps = diffusion_conf.get('time_steps', diffusion_conf.get('timesteps', 1000))
-        self.diff_utils = DiffusionUtils(T=timesteps, device=device)
+        self.diff_utils = DiffusionUtils(T=self.diffusion_config.time_steps, device=device)
 
-        # Optimizer and loss
-        learning_rate = training_conf.get('learning_rate', 1e-3)
+        # Optimizer with config-driven learning rate
         self.optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=float(learning_rate)
+            lr=self.training_config.learning_rate
         )
         self.loss_fn = nn.MSELoss()
+
+        # Gradient clipping threshold from config
+        self.gradient_clip = self.training_config.gradient_clip
 
         # Conditional generation settings
         self.num_classes = config.get('num_classes', 0)
         # Probability of dropping the conditioning during training for Classifier-Free Guidance
         self.cfg_probability = config.get('classifier_free_guidance_probability', 0.0)
 
-        # Validation settings
-        self.validation_interval = config.get('validation_interval', 0)
-        self.num_validation_samples = config.get('num_validation_samples', 100)
+        # Validation settings from config
+        self.validation_interval = self.training_config.validation_interval
+        self.num_validation_samples = self.training_config.num_validation_samples
+
+    def _parse_diffusion_config(self, config):
+        """Parse diffusion config from flat or nested format."""
+        diffusion_section = config.get('diffusion', {})
+        if isinstance(diffusion_section, dict) and diffusion_section:
+            return DiffusionConfig(**diffusion_section)
+
+        # Fall back to flat config
+        return DiffusionConfig(
+            time_steps=config.get('timesteps', config.get('time_steps', 1000)),
+            sampling_method=config.get('sampling_method', 'ddpm'),
+            num_inference_steps=config.get('ddim_steps', 50),
+        )
 
     def train(self, dataloader: DataLoader) -> torch.nn.Module:
         """
@@ -76,10 +91,10 @@ class DiffusionTrainer(BaseTrainer):
         # Get feature count for validation
         features = self.config.get('num_features', len(self.config.get('tickers', [])))
 
-        # Get training configuration
-        training_conf = self.config.get('training', self.config)
-        epochs = training_conf.get('epochs', 10)
+        # Use typed training config
+        epochs = self.training_config.epochs
         start_epoch = self.config.get('start_epoch', 0)
+        checkpoint_interval = self.training_config.checkpoint_interval
 
         # Load checkpoint if resuming
         if start_epoch > 0:
@@ -91,31 +106,37 @@ class DiffusionTrainer(BaseTrainer):
                 total_loss = 0
 
                 for batch in pbar:
-                    # Extract data from batch
-                    x_0 = self._extract_batch(batch)
+                    # Extract data and optional mask from batch
+                    x_0, mask = self._extract_batch(batch)
 
-                    # Sample timestep and add noise
-                    diffusion_conf = self.config.get('diffusion', self.config)
-                    timesteps = diffusion_conf.get('time_steps', diffusion_conf.get('timesteps', 1000))
+                    # Sample timestep and add noise using typed config
                     t = torch.randint(
-                        0, timesteps,
+                        0, self.diffusion_config.time_steps,
                         (x_0.shape[0],), device=self.device
                     ).long()
                     noise = torch.randn_like(x_0)
+
+                    # If mask provided, zero out noise at masked positions
+                    # This ensures we don't add noise to missing data
+                    if mask is not None:
+                        noise = noise * mask
+
                     x_t = self.diff_utils.q_sample(x_0, t, noise)
 
                     # Conditional generation
                     y_conditional = self._get_conditional_labels(x_0.shape[0])
 
-                    # Forward pass
-                    predicted_noise = self.model(x_t, t, y_conditional)
-                    loss = self.loss_fn(predicted_noise, noise)
+                    # Forward pass with mask
+                    predicted_noise = self.model(x_t, t, y_conditional, mask=mask)
+
+                    # Use masked loss if mask provided, otherwise regular MSE
+                    loss = masked_mse_loss(predicted_noise, noise, mask)
 
                     # Backward pass
                     self.optimizer.zero_grad()
                     loss.backward()
-                    # Gradient clipping to prevent exploding gradients (important for financial data)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    # Gradient clipping to prevent exploding gradients (configurable)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
                     self.optimizer.step()
 
                     # Logging
@@ -140,7 +161,7 @@ class DiffusionTrainer(BaseTrainer):
                     self._run_validation(epoch, features, step_count, dataloader)
 
                 # Checkpointing - save full checkpoint with optimizer state
-                if (epoch + 1) % 10 == 0 or epoch == epochs - 1:
+                if (epoch + 1) % checkpoint_interval == 0 or epoch == epochs - 1:
                     ckpt_filename = f"checkpoint_epoch_{epoch+1}.pt"
                     ckpt_path = os.path.join(tmpdir, ckpt_filename)
                     self.save_checkpoint(
@@ -155,17 +176,25 @@ class DiffusionTrainer(BaseTrainer):
 
     def _extract_batch(self, batch):
         """
-        Extract tensor from batch (handles TensorDataset tuples).
+        Extract data and optional mask from batch (handles TensorDataset tuples).
 
         Args:
-            batch: Batch from dataloader
+            batch: Batch from dataloader. Can be:
+                - Single tensor
+                - Tuple of (data,)
+                - Tuple of (data, mask) for masked training
 
         Returns:
-            Tensor moved to device
+            tuple: (data_tensor, mask_tensor or None) moved to device
         """
         if isinstance(batch, (list, tuple)):
-            return batch[0].to(self.device)
-        return batch.to(self.device)
+            data = batch[0].to(self.device)
+            if len(batch) > 1:
+                # Batch contains (data, mask)
+                mask = batch[1].to(self.device)
+                return data, mask
+            return data, None
+        return batch.to(self.device), None
 
     def _get_conditional_labels(self, batch_size):
         """

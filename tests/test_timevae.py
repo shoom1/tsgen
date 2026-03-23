@@ -9,7 +9,7 @@ import pytest
 import torch
 import numpy as np
 from tsgen.models.timevae import TimeVAE, TimeVAEEncoder, TimeVAEDecoder
-from tsgen.models.losses import vae_loss, linear_beta_schedule, VAELossTracker
+from tsgen.training.losses import vae_loss, linear_beta_schedule, VAELossTracker
 
 
 def test_timevae_initialization():
