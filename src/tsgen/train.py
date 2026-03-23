@@ -27,7 +27,8 @@ from tsgen.training.vae_trainer import VAETrainer
 from tsgen.training.baseline_trainer import BaselineTrainer
 
 
-def train_model(config: ExperimentConfig, tracker: ExperimentTracker):
+def train_model(config: ExperimentConfig, tracker: ExperimentTracker,
+                resume_from_checkpoint: str = None):
     """
     Main training entry point.
 
@@ -40,6 +41,7 @@ def train_model(config: ExperimentConfig, tracker: ExperimentTracker):
     Args:
         config: ExperimentConfig with validated hyperparameters
         tracker: Experiment tracker for logging metrics and artifacts
+        resume_from_checkpoint: Optional path to checkpoint file to resume from
 
     Returns:
         tuple: (trained_model, data_processor)
@@ -88,23 +90,22 @@ def train_model(config: ExperimentConfig, tracker: ExperimentTracker):
     trainer = TrainerRegistry.get_trainer(model_type, model, config, tracker, device)
 
     # Load checkpoint if resuming
-    checkpoint_path = getattr(config, 'resume_from_checkpoint', None)
-    if checkpoint_path:
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if resume_from_checkpoint:
+        if not os.path.exists(resume_from_checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {resume_from_checkpoint}")
 
         print(f"\n{'='*80}")
-        print(f"Loading checkpoint from: {checkpoint_path}")
+        print(f"Loading checkpoint from: {resume_from_checkpoint}")
 
         # Load checkpoint and restore training state
         checkpoint = trainer.load_checkpoint(
-            checkpoint_path,
+            resume_from_checkpoint,
             optimizer=trainer.optimizer if hasattr(trainer, 'optimizer') else None
         )
 
-        # Set start epoch from checkpoint
+        # Set start epoch on training config
         start_epoch = checkpoint.get('epoch', 0)
-        config.start_epoch = start_epoch
+        trainer.training_config.start_epoch = start_epoch
 
         print(f"Resuming from epoch {start_epoch}")
         if 'step_count' in checkpoint:

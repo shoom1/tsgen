@@ -58,7 +58,7 @@ class EvaluationPipeline:
         device: str = 'cpu',
         tickers: Optional[List[str]] = None,
         **kwargs
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Run all evaluators and aggregate metrics.
 
@@ -70,9 +70,12 @@ class EvaluationPipeline:
             **kwargs: Additional parameters passed to evaluators
 
         Returns:
-            Dictionary of all metric names to values
+            Dictionary of all metric names to values.
+            If any evaluators failed, includes '_failed_evaluators' key
+            mapping evaluator names to error messages.
         """
         all_metrics = {}
+        failed = {}
 
         for evaluator in self.evaluators:
             if self.verbose:
@@ -96,8 +99,12 @@ class EvaluationPipeline:
                     self._print_metrics(evaluator.name, metrics)
 
             except Exception as e:
+                failed[evaluator.name] = str(e)
                 if self.verbose:
-                    print(f"  Warning: {evaluator.name} failed: {e}")
+                    print(f"  WARNING: {evaluator.name} failed: {e}")
+
+        if failed:
+            all_metrics['_failed_evaluators'] = failed
 
         return all_metrics
 
