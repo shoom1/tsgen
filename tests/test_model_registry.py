@@ -23,8 +23,8 @@ class DummyModel(BaseGenerativeModel):
 
     @classmethod
     def from_config(cls, config, features=None):
-        seq_len = config.data.sequence_length if config.data else config.sequence_length
-        return cls(features=features or 1, sequence_length=seq_len)
+        data = config.get_data_config()
+        return cls(features=features or 1, sequence_length=data.sequence_length)
 
 
 @pytest.fixture(autouse=True)
