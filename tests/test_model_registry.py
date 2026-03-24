@@ -42,7 +42,7 @@ def test_register_and_create():
         pass
 
     from tsgen.config.schema import ExperimentConfig
-    config = ExperimentConfig(model_type='dummy', tickers=['A'], sequence_length=32)
+    config = ExperimentConfig(model_type='dummy', data={'tickers': ['A'], 'sequence_length': 32})
 
     model = ModelRegistry.create(config, features=3)
 
@@ -66,7 +66,7 @@ def test_register_multiple_types():
 def test_unknown_model_type_raises():
     """Unknown model_type raises ValueError with helpful message."""
     from tsgen.config.schema import ExperimentConfig
-    config = ExperimentConfig(model_type='nonexistent', tickers=['A'])
+    config = ExperimentConfig(model_type='nonexistent', data={'tickers': ['A']})
 
     with pytest.raises(ValueError, match="No model registered for model type 'nonexistent'"):
         ModelRegistry.create(config, features=1)
@@ -79,7 +79,7 @@ def test_unknown_model_type_lists_available():
         pass
 
     from tsgen.config.schema import ExperimentConfig
-    config = ExperimentConfig(model_type='bad_type', tickers=['A'])
+    config = ExperimentConfig(model_type='bad_type', data={'tickers': ['A']})
 
     with pytest.raises(ValueError, match="registered_one"):
         ModelRegistry.create(config, features=1)
