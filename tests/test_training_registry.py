@@ -32,11 +32,8 @@ def test_registry_get_diffusion_trainer():
     model = torch.nn.Linear(10, 10)
     config = ExperimentConfig(
         model_type='unet',
-        epochs=1,
-        timesteps=10,
-        learning_rate=1e-3,
-        sequence_length=10,
-        tickers=['A']
+        data={'tickers': ['A'], 'sequence_length': 10},
+        training={'epochs': 1, 'timesteps': 10, 'learning_rate': 1e-3},
     )
     tracker = NoOpTracker()
 
@@ -49,7 +46,11 @@ def test_registry_get_vae_trainer():
     """Test getting VAE trainer from registry."""
     from tsgen.models.timevae import TimeVAE
     model = TimeVAE(features=2, sequence_length=32, latent_dim=8, hidden_dim=16)
-    config = ExperimentConfig(model_type='timevae', epochs=1, learning_rate=1e-3)
+    config = ExperimentConfig(
+        model_type='timevae',
+        data={'tickers': ['A', 'B']},
+        training={'epochs': 1, 'learning_rate': 1e-3},
+    )
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('timevae', model, config, tracker, 'cpu')
@@ -60,7 +61,10 @@ def test_registry_get_baseline_trainer():
     """Test getting baseline trainer from registry."""
     from tsgen.models.baselines import MultivariateGBM
     model = MultivariateGBM(features=2)
-    config = ExperimentConfig(model_type='gbm', epochs=1)
+    config = ExperimentConfig(
+        model_type='gbm',
+        training={'epochs': 1},
+    )
     tracker = NoOpTracker()
 
     trainer = TrainerRegistry.get_trainer('gbm', model, config, tracker, 'cpu')
@@ -106,11 +110,19 @@ def test_trainer_has_common_interface():
 
     # Create trainers
     diff_config = ExperimentConfig(
-        model_type='unet', epochs=1, timesteps=10,
-        learning_rate=1e-3, sequence_length=10, tickers=['A']
+        model_type='unet',
+        data={'tickers': ['A'], 'sequence_length': 10},
+        training={'epochs': 1, 'timesteps': 10, 'learning_rate': 1e-3},
     )
-    vae_config = ExperimentConfig(model_type='timevae', epochs=1, learning_rate=1e-3)
-    baseline_config = ExperimentConfig(model_type='gbm', epochs=1)
+    vae_config = ExperimentConfig(
+        model_type='timevae',
+        data={'tickers': ['A', 'B']},
+        training={'epochs': 1, 'learning_rate': 1e-3},
+    )
+    baseline_config = ExperimentConfig(
+        model_type='gbm',
+        training={'epochs': 1},
+    )
 
     diff_trainer = TrainerRegistry.get_trainer('unet', diff_model, diff_config, tracker, device)
     vae_trainer = TrainerRegistry.get_trainer('timevae', vae_model, vae_config, tracker, device)
@@ -132,11 +144,8 @@ def test_trainer_stores_config_and_model():
     model = torch.nn.Linear(10, 10)
     config = ExperimentConfig(
         model_type='unet',
-        epochs=1,
-        timesteps=10,
-        learning_rate=1e-3,
-        sequence_length=10,
-        tickers=['A']
+        data={'tickers': ['A'], 'sequence_length': 10},
+        training={'epochs': 1, 'timesteps': 10, 'learning_rate': 1e-3},
     )
     tracker = NoOpTracker()
 

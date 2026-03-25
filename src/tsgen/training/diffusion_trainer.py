@@ -35,10 +35,9 @@ class DiffusionTrainer(BaseTrainer):
 
         # Parse configuration using typed config accessors
         self.training_config = config.get_training_config()
-        self.diffusion_config = config.get_diffusion_config()
 
         # Diffusion utilities
-        self.diff_utils = DiffusionUtils(T=self.diffusion_config.time_steps, device=device)
+        self.diff_utils = DiffusionUtils(T=self.training_config.timesteps, device=device)
 
         # Optimizer with config-driven learning rate
         self.optimizer = torch.optim.Adam(
@@ -51,9 +50,9 @@ class DiffusionTrainer(BaseTrainer):
         self.gradient_clip = self.training_config.gradient_clip
 
         # Conditional generation settings
-        self.num_classes = config.get_model_params_config().num_classes
+        self.num_classes = config.get_model_config().num_classes
         # Probability of dropping the conditioning during training for Classifier-Free Guidance
-        self.cfg_probability = getattr(config, 'classifier_free_guidance_probability', 0.0)
+        self.cfg_probability = self.training_config.classifier_free_guidance_probability
 
         # Validation settings from config
         self.validation_interval = self.training_config.validation_interval
@@ -97,7 +96,7 @@ class DiffusionTrainer(BaseTrainer):
 
                     # Sample timestep and add noise using typed config
                     t = torch.randint(
-                        0, self.diffusion_config.time_steps,
+                        0, self.training_config.timesteps,
                         (x_0.shape[0],), device=self.device
                     ).long()
                     noise = torch.randn_like(x_0)
