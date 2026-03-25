@@ -186,14 +186,21 @@ class TestExperimentConfig:
         assert d['model_type'] == 'unet'
         assert d['data']['tickers'] == ['AAPL']
 
-    def test_old_flat_fields_still_work(self):
-        """Old flat-field construction still works during migration."""
+    def test_get_data_config_returns_nested(self):
+        """get_data_config() returns the nested data section."""
         c = ExperimentConfig(
             model_type='unet',
-            tickers=['AAPL'],
-            sequence_length=32,
-            epochs=50,
+            data={'tickers': ['AAPL'], 'sequence_length': 32},
         )
-        # Old methods still work as shims
         data = c.get_data_config()
+        assert data.tickers == ['AAPL']
         assert data.sequence_length == 32
+
+    def test_get_evaluation_config_returns_nested(self):
+        """get_evaluation_config() returns the nested evaluation section."""
+        c = ExperimentConfig(
+            model_type='unet',
+            evaluation={'num_samples': 200},
+        )
+        ev = c.get_evaluation_config()
+        assert ev.num_samples == 200

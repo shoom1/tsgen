@@ -1,8 +1,8 @@
 """
 Configuration management with Pydantic validation.
 
-This module provides structured configuration schemas with validation,
-defaults, and backward compatibility for both flat and nested config formats.
+This module provides structured configuration schemas with validation
+and defaults for nested config format.
 
 Example usage:
     from tsgen.config import validate_config, ExperimentConfig
@@ -22,13 +22,10 @@ Example usage:
 from tsgen.config.schema import (
     # Config classes
     DataConfig,
-    DiffusionConfig,
     TrainingConfig,
     DiffusionTrainingConfig,
     VAETrainingConfig,
     BaselineTrainingConfig,
-    VAEConfig,
-    ModelParamsConfig,
     UNetModelConfig,
     TransformerModelConfig,
     MambaModelConfig,
@@ -47,13 +44,10 @@ from tsgen.config.schema import (
 
 __all__ = [
     'DataConfig',
-    'DiffusionConfig',
     'TrainingConfig',
     'DiffusionTrainingConfig',
     'VAETrainingConfig',
     'BaselineTrainingConfig',
-    'VAEConfig',
-    'ModelParamsConfig',
     'UNetModelConfig',
     'TransformerModelConfig',
     'MambaModelConfig',
