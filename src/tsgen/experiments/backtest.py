@@ -17,7 +17,7 @@ from tsgen.models.registry import ModelRegistry
 from tsgen.models.base_model import StatisticalModel
 from tsgen.tracking.base import ConsoleTracker, FileTracker
 from tsgen.train import train_model
-from tsgen.config.schema import ExperimentConfig
+from tsgen.config.schema import ExperimentConfig, DataConfig
 
 # Import models package to trigger ModelRegistry registration
 import tsgen.models
@@ -55,10 +55,8 @@ def _train_single_model(model_type, base_config, train_end, output_dir):
         print(f"Model {model_type} already trained. Skipping.")
         return {'model_path': model_path, 'processor_path': processor_path}
 
-    curr_config = base_config.model_copy(update={
-        'model_type': model_type,
-        'end_date': train_end.strftime('%Y-%m-%d'),
-    })
+    new_data = base_config.data.model_copy(update={'end_date': train_end.strftime('%Y-%m-%d')})
+    curr_config = base_config.model_copy(update={'model_type': model_type, 'data': new_data})
 
     tracker = FileTracker(log_file=f"backtest_{model_type}.log", experiment_dir=output_dir)
     try:
@@ -175,23 +173,22 @@ def run_backtest_experiment(config=None):
     if config is None:
         config = ExperimentConfig(
             experiment_name="Backtest_Exp",
-            tracker='console',
             model_type='unet',
-            tickers=['AAPL', 'MSFT', 'GOOG'],
-            start_date='2015-01-01',
-            end_date='2024-01-01',
-            sequence_length=256,
-            batch_size=32,
-            epochs=50,
-            timesteps=500,
-            learning_rate=1e-3,
-            base_channels=32,
-            dim=32,
-            depth=2,
-            heads=4,
+            data=DataConfig(
+                tickers=['AAPL', 'MSFT', 'GOOG'],
+                start_date='2015-01-01',
+                end_date='2024-01-01',
+                sequence_length=256,
+            ),
+            training={
+                'epochs': 50, 'batch_size': 32, 'learning_rate': 1e-3,
+                'timesteps': 500,
+            },
+            model={'base_channels': 32, 'dim': 32, 'depth': 2, 'heads': 4},
+            tracker='console',
         )
 
-    seq_len = config.sequence_length
+    seq_len = config.data.sequence_length
     n_paths = getattr(config, 'backtest_n_paths', 1000)
     models_to_test = getattr(config, 'backtest_models', None) or DEFAULT_MODELS
 
@@ -199,18 +196,18 @@ def run_backtest_experiment(config=None):
     print(f"Backtest outputs will be saved to: {output_dir}")
 
     # Define split
-    full_end = pd.to_datetime(config.end_date)
+    full_end = pd.to_datetime(config.data.end_date)
     test_start = full_end - timedelta(days=365)
     train_end = test_start
 
     print(f"--- Experiment Setup ---")
-    print(f"Train Period: {config.start_date} -> {train_end.strftime('%Y-%m-%d')}")
-    print(f"Test Period:  {test_start.strftime('%Y-%m-%d')} -> {config.end_date}")
+    print(f"Train Period: {config.data.start_date} -> {train_end.strftime('%Y-%m-%d')}")
+    print(f"Test Period:  {test_start.strftime('%Y-%m-%d')} -> {config.data.end_date}")
 
     # Data preparation
-    tickers = config.tickers
-    df_full = load_prices(tickers, config.start_date, config.end_date,
-                          column=config.column)
+    tickers = config.data.tickers
+    df_full = load_prices(tickers, config.data.start_date, config.data.end_date,
+                          column=config.data.column)
     df_full = clean_data(df_full, strategy='ffill_drop')
 
     df_test = df_full[df_full.index >= test_start]
