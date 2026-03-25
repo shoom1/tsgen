@@ -1,12 +1,116 @@
 """
-Loss functions for generative models.
+Loss functions for training generative models.
 
-Includes specialized loss functions for VAE, GAN, and other generative models.
+This module contains all loss functions used during training:
+- Generic masked losses for handling missing data
+- VAE losses with KL divergence and various regularization strategies
+- Loss tracking and diagnostic utilities
+
+Loss functions are training concerns (not model architecture) so they
+belong in the training module rather than models.
 """
 
 import torch
 import torch.nn.functional as F
 
+
+# =============================================================================
+# Generic Masked Losses (for missing data handling)
+# =============================================================================
+
+def masked_mse_loss(pred, target, mask=None):
+    """
+    Mean Squared Error loss computed only on valid (non-masked) positions.
+
+    This is essential for training on data with missing values. The loss
+    is computed only where the mask is 1, ignoring positions where data
+    is missing (mask is 0).
+
+    Args:
+        pred: (Batch, Seq_Len, Features) predicted values
+        target: (Batch, Seq_Len, Features) target values
+        mask: (Batch, Seq_Len, Features) binary mask, 1=valid, 0=masked
+              If None, computes regular MSE loss
+
+    Returns:
+        Scalar loss value
+
+    Example:
+        >>> pred = model(x_t, t, mask=mask)
+        >>> loss = masked_mse_loss(pred, noise, mask)
+        >>> loss.backward()
+    """
+    if mask is None:
+        return F.mse_loss(pred, target)
+
+    # Element-wise squared error
+    sq_error = (pred - target) ** 2
+
+    # Apply mask: only keep errors at valid positions
+    masked_error = sq_error * mask
+
+    # Compute mean over valid positions only
+    # Use clamp to avoid division by zero when mask is all zeros
+    num_valid = mask.sum().clamp(min=1)
+    return masked_error.sum() / num_valid
+
+
+def masked_l1_loss(pred, target, mask=None):
+    """
+    L1 (Mean Absolute Error) loss computed only on valid positions.
+
+    Args:
+        pred: (Batch, Seq_Len, Features) predicted values
+        target: (Batch, Seq_Len, Features) target values
+        mask: (Batch, Seq_Len, Features) binary mask, 1=valid, 0=masked
+              If None, computes regular L1 loss
+
+    Returns:
+        Scalar loss value
+    """
+    if mask is None:
+        return F.l1_loss(pred, target)
+
+    abs_error = torch.abs(pred - target)
+    masked_error = abs_error * mask
+    num_valid = mask.sum().clamp(min=1)
+    return masked_error.sum() / num_valid
+
+
+def masked_huber_loss(pred, target, mask=None, delta=1.0):
+    """
+    Huber loss (smooth L1) computed only on valid positions.
+
+    Huber loss is less sensitive to outliers than MSE.
+
+    Args:
+        pred: (Batch, Seq_Len, Features) predicted values
+        target: (Batch, Seq_Len, Features) target values
+        mask: (Batch, Seq_Len, Features) binary mask, 1=valid, 0=masked
+        delta: Threshold for switching between L1 and L2 loss
+
+    Returns:
+        Scalar loss value
+    """
+    if mask is None:
+        return F.smooth_l1_loss(pred, target, beta=delta)
+
+    # Compute element-wise Huber loss
+    diff = torch.abs(pred - target)
+    huber = torch.where(
+        diff < delta,
+        0.5 * diff ** 2,
+        delta * (diff - 0.5 * delta)
+    )
+
+    masked_loss = huber * mask
+    num_valid = mask.sum().clamp(min=1)
+    return masked_loss.sum() / num_valid
+
+
+# =============================================================================
+# VAE Losses
+# =============================================================================
 
 def vae_loss(recon, x, mu, logvar, beta=1.0):
     """
@@ -47,31 +151,52 @@ def vae_loss(recon, x, mu, logvar, beta=1.0):
     return total_loss, recon_loss, kl_loss
 
 
-def vae_loss_with_annealing(recon, x, mu, logvar, beta_schedule, epoch):
+def vae_loss_with_free_bits(recon, x, mu, logvar, beta=1.0, free_bits=0.5):
     """
-    VAE loss with KL annealing schedule.
+    VAE loss with free bits constraint to prevent posterior collapse.
 
-    Gradually increases beta from 0 to 1 over training to prevent
-    posterior collapse.
+    Free bits: Don't penalize KL divergence if it's already below a threshold.
+    This prevents the encoder from completely collapsing to the prior.
 
     Args:
         recon: Reconstructed data (Batch, Seq, Features)
         x: Original data (Batch, Seq, Features)
         mu: Mean of latent distribution (Batch, latent_dim)
         logvar: Log-variance of latent distribution (Batch, latent_dim)
-        beta_schedule: Function that maps epoch -> beta value
-        epoch: Current epoch number
+        beta: Weight for KL divergence term
+        free_bits: Minimum KL bits per dimension (e.g., 0.5 bits)
 
     Returns:
         total_loss: Combined loss (scalar)
         recon_loss: Reconstruction loss component (scalar)
         kl_loss: KL divergence component (scalar)
-        current_beta: Beta value used (for logging)
+        kl_per_dim_mean: Mean KL per dimension for monitoring (latent_dim,)
     """
-    beta = beta_schedule(epoch)
-    total_loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar, beta)
-    return total_loss, recon_loss, kl_loss, beta
+    # Reconstruction loss (MSE)
+    recon_loss = F.mse_loss(recon, x, reduction='mean')
 
+    # Per-dimension KL divergence
+    kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())  # (Batch, latent_dim)
+
+    # Apply free bits constraint per dimension
+    # Only penalize KL if it's above the free bits threshold
+    kl_per_dim_clamped = torch.clamp(kl_per_dim, min=free_bits)
+
+    # Average over batch and dimensions
+    kl_loss = torch.mean(kl_per_dim_clamped)
+
+    # Total loss
+    total_loss = recon_loss + beta * kl_loss
+
+    # Return per-dim KL for monitoring
+    kl_per_dim_mean = torch.mean(kl_per_dim, dim=0)  # (latent_dim,)
+
+    return total_loss, recon_loss, kl_loss, kl_per_dim_mean
+
+
+# =============================================================================
+# Beta Schedules for VAE Training
+# =============================================================================
 
 def linear_beta_schedule(max_epochs, warmup_epochs=50, max_beta=0.5):
     """
@@ -123,48 +248,9 @@ def cyclical_beta_schedule(cycle_length=10, n_cycles=4, max_beta=1.0):
     return schedule
 
 
-def vae_loss_with_free_bits(recon, x, mu, logvar, beta=1.0, free_bits=0.5):
-    """
-    VAE loss with free bits constraint to prevent posterior collapse.
-
-    Free bits: Don't penalize KL divergence if it's already below a threshold.
-    This prevents the encoder from completely collapsing to the prior.
-
-    Args:
-        recon: Reconstructed data (Batch, Seq, Features)
-        x: Original data (Batch, Seq, Features)
-        mu: Mean of latent distribution (Batch, latent_dim)
-        logvar: Log-variance of latent distribution (Batch, latent_dim)
-        beta: Weight for KL divergence term
-        free_bits: Minimum KL bits per dimension (e.g., 0.5 bits)
-
-    Returns:
-        total_loss: Combined loss (scalar)
-        recon_loss: Reconstruction loss component (scalar)
-        kl_loss: KL divergence component (scalar)
-        kl_per_dim_mean: Mean KL per dimension for monitoring (latent_dim,)
-    """
-    # Reconstruction loss (MSE)
-    recon_loss = F.mse_loss(recon, x, reduction='mean')
-
-    # Per-dimension KL divergence
-    kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())  # (Batch, latent_dim)
-
-    # Apply free bits constraint per dimension
-    # Only penalize KL if it's above the free bits threshold
-    kl_per_dim_clamped = torch.clamp(kl_per_dim, min=free_bits)
-
-    # Average over batch and dimensions
-    kl_loss = torch.mean(kl_per_dim_clamped)
-
-    # Total loss
-    total_loss = recon_loss + beta * kl_loss
-
-    # Return per-dim KL for monitoring
-    kl_per_dim_mean = torch.mean(kl_per_dim, dim=0)  # (latent_dim,)
-
-    return total_loss, recon_loss, kl_loss, kl_per_dim_mean
-
+# =============================================================================
+# Training Utilities
+# =============================================================================
 
 class VAELossTracker:
     """

@@ -1,302 +1,234 @@
+"""
+Evaluation module for synthetic time series quality assessment.
+
+Uses composable EvaluationPipeline with modular MetricEvaluator classes
+for comprehensive analysis of generated time series.
+
+Example:
+    from tsgen import evaluate_model
+    from tsgen.evaluation import EvaluationPipeline, StylizedFactsEvaluator
+
+    # Use default evaluators
+    result = evaluate_model(config, tracker)
+
+    # Or create custom pipeline
+    pipeline = EvaluationPipeline([
+        StylizedFactsEvaluator(lags=30),
+    ], tracker=tracker)
+    result = evaluate_model(config, tracker, pipeline=pipeline)
+"""
+
 import torch
-import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
-import joblib
 import os
 import tempfile
-from tsgen.models.factory import create_model
-from tsgen.models.diffusion import DiffusionUtils
-from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows
+from tsgen.models.registry import ModelRegistry
+from tsgen.models.base_model import StatisticalModel
+from tsgen.data.pipeline import load_prices, clean_data, create_windows
 from tsgen.data.processor import DataProcessor
 from tsgen.tracking.base import ExperimentTracker
-from tsgen.analysis.metrics import (
-    calculate_stylized_facts,
-    plot_stylized_facts,
-    compute_correlation_structure_metrics,
-    plot_correlation_structure
-)
-from tsgen.analysis.tstr import train_and_evaluate_tstr
-from tsgen.analysis.distribution_tests import run_all_distribution_tests
+from tsgen.evaluation import EvaluationPipeline, EvaluationResult
+from tsgen.config.schema import ExperimentConfig, DiffusionTrainingConfig, TRAINING_CONFIG_MAP, BaselineTrainingConfig
 
 
-class Discriminator(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64):
-        super().__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, 1)
-        self.sigmoid = nn.Sigmoid()
-        
-    def forward(self, x):
-        _, (h_n, _) = self.lstm(x)
-        out = self.fc(h_n[-1])
-        return self.sigmoid(out)
+def evaluate_model(
+    config: ExperimentConfig,
+    tracker: ExperimentTracker,
+    pipeline: EvaluationPipeline = None
+) -> EvaluationResult:
+    """
+    Evaluate model using composable EvaluationPipeline.
 
-def train_discriminator(real_data, fake_data, device, epochs=20):
-    real_labels = torch.ones(len(real_data), 1)
-    fake_labels = torch.zeros(len(fake_data), 1)
-    X = torch.cat([torch.FloatTensor(real_data), torch.FloatTensor(fake_data)])
-    y = torch.cat([real_labels, fake_labels])
-    
-    dataset = torch.utils.data.TensorDataset(X, y)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
-    
-    model = Discriminator(input_dim=real_data.shape[2]).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    criterion = nn.BCELoss()
-    
-    for epoch in range(epochs):
-        model.train()
-        for batch_x, batch_y in loader:
-            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-            optimizer.zero_grad()
-            preds = model(batch_x)
-            loss = criterion(preds, batch_y)
-            loss.backward()
-            optimizer.step()
-            
-    # Eval
-    model.eval()
-    with torch.no_grad():
-        all_preds = model(X.to(device))
-        predicted_labels = (all_preds > 0.5).float().cpu()
-        acc = (predicted_labels == y).float().mean().item()
-        
-    return acc
+    Loads a trained model and processor from tracker artifacts, generates
+    synthetic samples, loads real data for comparison, and runs all
+    configured evaluators (stylized facts, correlation, distribution tests,
+    discriminator, TSTR).
 
-def evaluate_model(config, tracker: ExperimentTracker):
+    Args:
+        config: ExperimentConfig instance
+        tracker: Experiment tracker for logging
+        pipeline: Optional custom EvaluationPipeline (uses default if None)
+
+    Returns:
+        EvaluationResult with metrics and plotting support
+
+    Example:
+        from tsgen.evaluation import StylizedFactsEvaluator, DiscriminatorEvaluator
+
+        # Use default pipeline
+        result = evaluate_model(config, tracker)
+
+        # Or create custom pipeline
+        pipeline = EvaluationPipeline([
+            StylizedFactsEvaluator(lags=30),
+            DiscriminatorEvaluator(epochs=30),
+        ], tracker=tracker)
+        result = evaluate_model(config, tracker, pipeline=pipeline)
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Evaluating...")
 
     # Resolve config sections
-    data_conf = config.get('data', config)
+    data_conf = config.get_data_config()
+    tickers = data_conf.tickers
 
-    # Get tickers (may need to recover from processor later if not in config)
-    tickers = data_conf.get('tickers')
-    features = len(tickers) if tickers else None
+    # Determine if this is a statistical (baseline) model before constructing
+    is_baseline = TRAINING_CONFIG_MAP.get(config.model_type) is BaselineTrainingConfig
 
-    # Model Factory
-    model = create_model(config).to(device)
-    
     try:
-        # Get artifact paths via tracker (with fallback for non-file trackers)
+        # Get artifact paths via tracker
         model_path = tracker.get_artifact_path("model_final.pt", artifact_type='model')
         processor_path = tracker.get_artifact_path("processor.pkl", artifact_type='data')
 
         # Fallback for trackers that don't implement get_artifact_path
         if model_path is None:
-            # Try common default locations
-            if 'output_dir' in config:
-                model_path = os.path.join(config['output_dir'], "model_final.pt")
-                processor_path = os.path.join(config['output_dir'], "processor.pkl")
+            output_dir = getattr(config, 'output_dir', None)
+            if output_dir:
+                model_path = os.path.join(output_dir, "model_final.pt")
+                processor_path = os.path.join(output_dir, "processor.pkl")
             else:
                 model_path = "model_final.pt"
                 processor_path = "processor.pkl"
 
-        if hasattr(model, 'fit'):
-            # Load full model for baselines
+        # StatisticalModel saves full object; others save state_dict
+        if is_baseline:
             model = torch.load(model_path, map_location=device)
         else:
-            # Load state dict for diffusion models
+            model = ModelRegistry.create(config).to(device)
             model.load_state_dict(torch.load(model_path, map_location=device))
 
-        # Load Processor
         processor = DataProcessor.load(processor_path)
 
     except FileNotFoundError as e:
         print(f"Artifacts not found: {e}. Please run training first.")
-        return
+        raise
     except (RuntimeError, KeyError) as e:
         print(f"Error loading model: {type(e).__name__}: {e}")
         print("Model architecture may have changed. Try retraining.")
-        return
+        raise
 
-    # Resolve config sections (needed for downstream usage)
-    diff_conf = config.get('diffusion', config)
+    # Resolve diffusion config
+    training_conf = config.get_training_config()
+    timesteps = training_conf.timesteps if isinstance(training_conf, DiffusionTrainingConfig) else 1000
 
-    # Handle tickers (if missing in config, try to recover from processor)
-    if tickers is None:
+    # Handle tickers recovery from processor
+    if not tickers:
         if hasattr(processor, 'feature_names_in_'):
             tickers = list(processor.feature_names_in_)
         elif hasattr(processor, 'n_features_'):
             tickers = [f"Asset_{i}" for i in range(processor.n_features_)]
 
-        # Backfill config for downstream usage
-        config['tickers'] = tickers
-        data_conf['tickers'] = tickers
-
     features = len(tickers)
-    timesteps = diff_conf.get('time_steps', diff_conf.get('T', config.get('timesteps', 1000)))
 
-    # 1. Generate Data
-    num_samples = config.get('evaluation', config).get('num_samples', 500)
-    print(f"Generating {num_samples} synthetic samples for analysis...")
-    
-    # Determine sampling method
-    sampling_method = diff_conf.get('sampling_method', config.get('sampling_method', 'ddpm')).lower()
-    ddim_steps = diff_conf.get('num_inference_steps', config.get('ddim_steps', 50))
-    
-    # Conditional Generation Setup (for inference)
-    num_classes = config.get('model', config).get('params', config).get('num_classes', 0)
+    # Generate synthetic samples
+    eval_conf = config.get_evaluation_config()
+    num_samples = eval_conf.num_samples
+    print(f"Generating {num_samples} synthetic samples...")
+
+    # Conditional Generation Setup (for class-conditioned models)
+    model_conf = config.get_model_config()
+    num_classes = getattr(model_conf, 'num_classes', 0)
     y_sampling = None
     if num_classes > 0:
-        # For evaluation, we can generate samples for a specific class or random classes
-        # Here, we generate random classes for each sample
         y_sampling = torch.randint(0, num_classes, (num_samples,), device=device).long()
         print(f"Generating samples conditioned on {num_classes} classes.")
 
-    if hasattr(model, 'sample'):
-        # Baseline Model Generation
-        gen_seqs = model.sample(num_samples, data_conf.get('sequence_length', config.get('sequence_length'))).to(device)
-    else:
-        # Diffusion Model Generation
-        diff_utils = DiffusionUtils(T=timesteps, device=device)
-        if sampling_method == 'ddim':
-            print(f"Using DDIM sampling with {ddim_steps} steps.")
-            gen_seqs = diff_utils.ddim_sample(model, image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features), batch_size=num_samples, num_inference_steps=ddim_steps, y=y_sampling)
-        else:
-            print("Using DDPM sampling.")
-            gen_seqs = diff_utils.sample(model, image_size=(data_conf.get('sequence_length', config.get('sequence_length')), features), batch_size=num_samples, y=y_sampling)
-        
-    gen_seqs_np = gen_seqs.cpu().numpy() # (N, Seq, Feat) - Scaled returns
+    # Use unified generate() interface for all model types
+    gen_seqs = model.generate(
+        n_samples=num_samples,
+        seq_len=data_conf.sequence_length,
+        device=device,
+        y=y_sampling
+    )
 
-    # 2. Real Data Preparation
-    # Load raw data for plotting
+    gen_seqs_np = gen_seqs.cpu().numpy()
+
+    # Load and prepare real data
     df = load_prices(
         tickers,
-        data_conf.get('start_date', config.get('start_date')),
-        data_conf.get('end_date', config.get('end_date')),
-        column=data_conf.get('column', config.get('column', 'adj_close')),
-        db_path=data_conf.get('db_path', config.get('db_path'))
+        data_conf.start_date,
+        data_conf.end_date,
+        column=data_conf.column,
+        db_path=data_conf.db_path
     )
     df_real = clean_data(df, strategy='ffill_drop')
-
-    # Use fitted processor to transform (don't refit)
     real_data_scaled = processor.transform(df_real)
+    real_seqs_scaled = create_windows(
+        real_data_scaled,
+        sequence_length=data_conf.sequence_length
+    )
 
-    # Create windows
-    real_seqs_scaled = create_windows(real_data_scaled, sequence_length=data_conf.get('sequence_length', config.get('sequence_length')))
-    
-    # Ensure we compare same amount of data if possible
+    # Ensure we compare same amount of data
     limit = min(len(real_seqs_scaled), num_samples)
     real_sample = real_seqs_scaled[:limit]
     fake_sample = gen_seqs_np[:limit]
-    
-    # --- Advanced Metrics ---
-    print("Calculating Stylized Facts...")
-    sf_metrics = calculate_stylized_facts(real_sample, fake_sample)
-    
-    # Log Metrics
-    tracker.log_metrics({
-        "kurtosis_diff_mean": np.mean(sf_metrics['kurtosis_diff']),
-        "skew_diff_mean": np.mean(sf_metrics['skew_diff']),
-        "acf_ret_diff_mse": sf_metrics['acf_ret_diff'],
-        "acf_sq_ret_diff_mse": sf_metrics['acf_sq_ret_diff'],
-        "corr_matrix_norm_diff": sf_metrics['corr_matrix_diff_norm'],
-        "var_diff_mean": np.mean(sf_metrics['var_diff']),
-        "es_diff_mean": np.mean(sf_metrics['es_diff'])
-    })
 
-    # --- Correlation Structure Analysis ---
-    print("Analyzing Correlation Structure...")
-    corr_metrics = compute_correlation_structure_metrics(real_sample, fake_sample)
+    # Create pipeline if not provided
+    if pipeline is None:
+        pipeline = EvaluationPipeline.from_config(config, tracker=tracker)
 
-    # Log correlation metrics
-    correlation_log_metrics = {
-        "corr_frobenius_norm": corr_metrics['corr_frobenius_norm'],
-        "corr_max_diff": corr_metrics['corr_max_diff'],
-        "corr_mean_diff": corr_metrics['corr_mean_diff'],
-        "eigenvalue_mse": corr_metrics['eigenvalue_mse'],
-        "eigenvalue_max_diff": corr_metrics['eigenvalue_max_diff'],
-        "explained_var_ratio_diff": corr_metrics['explained_var_ratio_diff']
-    }
+    # Run evaluation
+    metrics = pipeline.run(
+        real_sample,
+        fake_sample,
+        device=device,
+        tickers=tickers
+    )
 
-    # Add rolling correlation metrics if available
-    if not np.isnan(corr_metrics.get('rolling_corr_stability', np.nan)):
-        correlation_log_metrics['rolling_corr_stability'] = corr_metrics['rolling_corr_stability']
-        correlation_log_metrics['rolling_corr_std_diff'] = corr_metrics['rolling_corr_std_diff']
+    # Create result object
+    result = EvaluationResult(
+        metrics=metrics,
+        real_data=real_sample,
+        synthetic_data=fake_sample,
+        tickers=tickers
+    )
 
-    tracker.log_metrics(correlation_log_metrics)
-
-    print(f"Correlation Structure Metrics:")
-    print(f"  Frobenius Norm: {corr_metrics['corr_frobenius_norm']:.4f}")
-    print(f"  Max Difference: {corr_metrics['corr_max_diff']:.4f}")
-    print(f"  Mean Difference: {corr_metrics['corr_mean_diff']:.4f}")
-    print(f"  Eigenvalue MSE: {corr_metrics['eigenvalue_mse']:.4f}")
-    if not np.isnan(corr_metrics.get('rolling_corr_stability', np.nan)):
-        print(f"  Rolling Correlation Stability: {corr_metrics['rolling_corr_stability']:.4f}")
-
-    # --- Distribution Tests ---
-    print("Running Distribution Tests (KS, CvM, AD)...")
-    dist_results = run_all_distribution_tests(real_sample, fake_sample)
-
-    dist_metrics = {}
-    for test_name, res in dist_results.items():
-        short_name = test_name.replace(" ", "").replace("-", "")
-        if 'statistic' in res:
-            dist_metrics[f"dist_{short_name}_stat"] = res['statistic']
-        if 'p_value' in res:
-            dist_metrics[f"dist_{short_name}_p"] = res['p_value']
-
-    tracker.log_metrics(dist_metrics)
-    print(f"Distribution Test Results: {dist_metrics}")
-
-    # TSTR
-    print("Calculating TSTR Score (Train Synthetic, Test Real)...")
-    tstr_mse = train_and_evaluate_tstr(fake_sample, real_sample, epochs=10, device=device)
-    print(f"TSTR MSE: {tstr_mse:.6f}")
-    tracker.log_metrics({"tstr_mse": tstr_mse})
-
-    # --- Generate and save all plots using tempfile ---
+    # Generate and save plots
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Plot correlation structure
-        corr_plot_path = os.path.join(tmpdir, "correlation_structure.png")
-        plot_correlation_structure(corr_metrics, tickers, save_path=corr_plot_path)
-        tracker.log_artifact(corr_plot_path, artifact_type='plot')
+        result.generate_plots(tmpdir, tracker=tracker)
 
-        # Plot Stylized Facts
-        sf_plot_path = os.path.join(tmpdir, "stylized_facts.png")
-        plot_stylized_facts(sf_metrics, tickers, save_path=sf_plot_path)
-        tracker.log_artifact(sf_plot_path, artifact_type='plot')
+        # Also generate price path comparison plot
+        _generate_price_comparison_plot(
+            gen_seqs_np, processor, features, tickers,
+            df_real, data_conf, tmpdir, tracker
+        )
 
-        # --- Visualizations (Price Paths) ---
-        # Inverse transform a subset using the processor
-        subset_size = 5
-        gen_subset = gen_seqs_np[:subset_size]  # (5, Seq, Feat)
+    print(f"\nEvaluation complete.")
+    print(result.summary())
 
-        # Use processor inverse_transform
-        # Initial price 100 for all assets
-        initial_prices = np.ones(features) * 100
-        # prices: (5, Seq+1, Feat)
-        generated_prices_subset = processor.inverse_transform(gen_subset, initial_prices)
+    return result
 
-        fig, axes = plt.subplots(features, 1, figsize=(12, 6 * features))
-        if features == 1:
-            axes = [axes]
 
-        for i, ticker in enumerate(tickers):
-            ax = axes[i]
-            real_price_section = df_real[ticker].iloc[-data_conf.get('sequence_length', config.get('sequence_length'))-1:].values
-            if len(real_price_section) > 0:
-                norm_real = real_price_section / real_price_section[0] * 100
-                ax.plot(norm_real, label='Real', color='black')
+def _generate_price_comparison_plot(
+    gen_seqs_np, processor, features, tickers,
+    df_real, data_conf, tmpdir, tracker
+):
+    """Generate price path comparison plot (helper function)."""
+    subset_size = 5
+    gen_subset = gen_seqs_np[:subset_size]
+    initial_prices = np.ones(features) * 100
+    generated_prices_subset = processor.inverse_transform(gen_subset, initial_prices)
 
-                for j in range(subset_size):
-                    # Plot generated path. Note generated_prices_subset has length Seq+1
-                    # generated_prices_subset[j, :, i]
-                    ax.plot(generated_prices_subset[j, :, i], alpha=0.6, linestyle='--')
-                ax.set_title(f"{ticker}")
+    fig, axes = plt.subplots(features, 1, figsize=(12, 6 * features))
+    if features == 1:
+        axes = [axes]
 
-        plot_path = os.path.join(tmpdir, "synthetic_comparison.png")
-        plt.tight_layout()
-        plt.savefig(plot_path)
-        tracker.log_artifact(plot_path, artifact_type='plot')
-        print(f"Saved synthetic comparison plot")
+    seq_len = data_conf.sequence_length
 
-    # Discriminator
-    score = train_discriminator(real_sample, fake_sample, device)
-    print(f"Discriminator Accuracy: {score:.4f}")
-    tracker.log_metrics({"discriminator_accuracy": score})
+    for i, ticker in enumerate(tickers):
+        ax = axes[i]
+        real_price_section = df_real[ticker].iloc[-seq_len-1:].values
+        if len(real_price_section) > 0:
+            norm_real = real_price_section / real_price_section[0] * 100
+            ax.plot(norm_real, label='Real', color='black')
 
-    # Return metrics for testing/validation
-    return {"discriminator_accuracy": score}
+            for j in range(subset_size):
+                ax.plot(generated_prices_subset[j, :, i], alpha=0.6, linestyle='--')
+            ax.set_title(f"{ticker}")
+
+    plot_path = os.path.join(tmpdir, "synthetic_comparison.png")
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    plt.close()
+    tracker.log_artifact(plot_path, artifact_type='plot')

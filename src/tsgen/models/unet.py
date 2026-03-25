@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tsgen.models.base_model import GenerativeModel
+from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 
 class Block1D(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim, kernel_size=3):
@@ -26,9 +27,16 @@ class Block1D(nn.Module):
         h = self.relu(h)
         return h
 
-class UNet1D(GenerativeModel):
+@ModelRegistry.register('unet')
+class UNet1D(DiffusionModel):
     def __init__(self, sequence_length, features, base_channels=64):
         super().__init__()
+        if sequence_length % 4 != 0:
+            raise ValueError(
+                f"UNet1D requires sequence_length divisible by 4 (got {sequence_length}). "
+                f"Two levels of MaxPool1d(2) and Upsample(2) require this."
+            )
+        self.features = features
         self.time_dim = base_channels * 4
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(base_channels),
@@ -46,7 +54,11 @@ class UNet1D(GenerativeModel):
         self.up2 = Block1D(base_channels * 2 + base_channels, base_channels, self.time_dim)
         self.final_conv = nn.Conv1d(base_channels, features, kernel_size=1)
 
-    def forward(self, x, t, y=None):
+    @classmethod
+    def _model_kwargs_from_config(cls, params) -> dict:
+        return {'base_channels': params.base_channels}
+
+    def forward(self, x, t, y=None, mask=None):
         """
         Forward pass for UNet1D.
 
@@ -54,11 +66,12 @@ class UNet1D(GenerativeModel):
             x: Input tensor (Batch, Seq_Len, Features)
             t: Timesteps (Batch,)
             y: Optional class labels (Batch,) - not used by UNet, for API compatibility
+            mask: Optional binary mask (Batch, Seq_Len, Features) - not used by UNet
+                  (UNet uses convolutions which don't support attention-style masking)
 
         Returns:
             Predicted noise (Batch, Seq_Len, Features)
         """
-        # Note: UNet doesn't use class conditioning (y), parameter added for API compatibility
         x = x.transpose(1, 2)
         t = self.time_mlp(t)
         x1 = self.down1(x, t)

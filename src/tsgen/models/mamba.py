@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from tsgen.models.base_model import GenerativeModel
+from tsgen.models.base_model import DiffusionModel
 from tsgen.models.embeddings import SinusoidalPositionEmbeddings
+from tsgen.models.registry import ModelRegistry
 
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5):
@@ -180,22 +181,27 @@ class MambaBlock(nn.Module):
         # 5. Out-projection
         return self.out_proj(output)
 
-class MambaDiffusion(GenerativeModel):
+@ModelRegistry.register('mamba')
+class MambaDiffusion(DiffusionModel):
     """
     Diffusion Model using Mamba (S4) backbone.
     """
+
+    supports_conditioning = True
+    supports_masking = False  # Mamba is sequential, doesn't use attention masking
     def __init__(
-        self, 
-        sequence_length: int, 
-        features: int, 
-        dim: int = 128, 
-        depth: int = 4, 
+        self,
+        sequence_length: int,
+        features: int,
+        dim: int = 128,
+        depth: int = 4,
         d_state: int = 16,
         d_conv: int = 4,
         expand: int = 2,
         num_classes: int = 0
     ):
         super().__init__()
+        self.features = features
         self.dim = dim
         self.num_classes = num_classes
 
@@ -231,25 +237,47 @@ class MambaDiffusion(GenerativeModel):
         self.norm_f = RMSNorm(dim)
         self.output_proj = nn.Linear(dim, features)
 
-    def forward(self, x, t, y=None):
-        # x: (B, L, Features)
-        
+    @classmethod
+    def _model_kwargs_from_config(cls, params) -> dict:
+        return {
+            'dim': params.dim,
+            'depth': params.depth,
+            'd_state': params.d_state,
+            'd_conv': params.d_conv,
+            'expand': params.expand,
+            'num_classes': params.num_classes,
+        }
+
+    def forward(self, x, t, y=None, mask=None):
+        """
+        Forward pass for MambaDiffusion.
+
+        Args:
+            x: Input tensor (Batch, Seq_Len, Features)
+            t: Timesteps (Batch,)
+            y: Optional class labels (Batch,) for conditional generation
+            mask: Optional binary mask (Batch, Seq_Len, Features) - not used by Mamba
+                  (Mamba is a sequential SSM model, mask accepted for API compatibility)
+
+        Returns:
+            Predicted noise (Batch, Seq_Len, Features)
+        """
         # 1. Project Input
         x = self.input_proj(x)
-        
+
         # 2. Add Time Embedding
         t_emb = self.time_mlp(t) # (B, Dim)
         x = x + t_emb.unsqueeze(1)
-        
+
         # 3. Add Class Embedding
         if self.num_classes > 0 and y is not None:
             y_emb = self.label_emb(y)
             x = x + y_emb.unsqueeze(1)
-            
+
         # 4. Mamba Layers (Residual)
         for layer in self.layers:
             x = x + layer(x)
-            
+
         # 5. Output
         x = self.norm_f(x)
         return self.output_proj(x)

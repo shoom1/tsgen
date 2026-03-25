@@ -4,22 +4,24 @@
 experiment_name: 'pipeline_with_split'
 model_type: 'unet'
 
-# Data
-tickers: ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA']
-start_date: '2020-01-01'
-end_date: '2024-12-31'
+model:
+  base_channels: 64
 
-# Training
-sequence_length: 64
-batch_size: 32
-epochs: 50
-timesteps: 500
-learning_rate: 1e-3
-base_channels: 64
+data:
+  tickers: ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA']
+  start_date: '2020-01-01'
+  end_date: '2024-12-31'
+  sequence_length: 64
+
+training:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 1e-3
+  timesteps: 500
 
 # Advanced pipeline with temporal split
 # This trains only on 80% of data (proper out-of-sample validation)
-DataPipeline:
+data_pipeline:
   # Load full dataset
   - load_prices:
       column: 'adj_close'
@@ -46,4 +48,6 @@ DataPipeline:
       shuffle: true
 
 tracker: 'file'
+
+# Extra fields (kept at root)
 experiment_dir: 'experiments/pipeline_split_example'

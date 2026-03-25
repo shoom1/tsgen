@@ -9,7 +9,7 @@ import pytest
 import torch
 import numpy as np
 from tsgen.models.timevae import TimeVAE, TimeVAEEncoder, TimeVAEDecoder
-from tsgen.models.losses import vae_loss, linear_beta_schedule, VAELossTracker
+from tsgen.training.losses import vae_loss, linear_beta_schedule, VAELossTracker
 
 
 def test_timevae_initialization():
@@ -109,7 +109,7 @@ def test_timevae_sample():
     """Test TimeVAE sampling from prior."""
     model = TimeVAE(features=3, sequence_length=64, hidden_dim=32, latent_dim=8)
 
-    samples = model.sample(10)
+    samples = model.generate(10)
 
     assert samples.shape == (10, 64, 3)
     assert torch.all(torch.isfinite(samples))
@@ -120,15 +120,15 @@ def test_timevae_sample_sequence_length_validation():
     model = TimeVAE(features=2, sequence_length=64)
 
     # Should work with default or matching length
-    samples1 = model.sample(5)
+    samples1 = model.generate(5)
     assert samples1.shape == (5, 64, 2)
 
-    samples2 = model.sample(5, sequence_length=64)
+    samples2 = model.generate(5, seq_len=64)
     assert samples2.shape == (5, 64, 2)
 
     # Should raise error for different length
     with pytest.raises(ValueError):
-        model.sample(5, sequence_length=128)
+        model.generate(5, seq_len=128)
 
 
 def test_timevae_encode_decode():
@@ -286,7 +286,7 @@ def test_timevae_save_load():
 
     # Generate sample
     torch.manual_seed(42)
-    sample1 = model.sample(3)
+    sample1 = model.generate(3)
 
     # Save model
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pt') as f:
@@ -300,7 +300,7 @@ def test_timevae_save_load():
 
         # Generate sample with same seed
         torch.manual_seed(42)
-        sample2 = loaded_model.sample(3)
+        sample2 = loaded_model.generate(3)
 
         # Should be identical
         assert torch.allclose(sample1, sample2, atol=1e-5)

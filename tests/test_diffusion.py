@@ -148,15 +148,15 @@ class TestGetTimeSteps:
         assert len(time_steps) == 11
 
     def test_get_time_steps_values(self):
-        """Test get_time_steps returns values from T to 0."""
+        """Test get_time_steps returns values from T-1 to 0 (0-indexed)."""
         diff = DiffusionUtils(T=100, device='cpu')
 
         time_steps = diff.get_time_steps(num_inference_steps=10)
 
-        # First step should be T
-        assert time_steps[0].item() == 100
-        # Last step should be close to 0
-        assert time_steps[-1].item() <= 1
+        # First step should be T-1 (0-indexed, so max index is 99 for T=100)
+        assert time_steps[0].item() == 99
+        # Last step should be 0
+        assert time_steps[-1].item() == 0
 
     def test_get_time_steps_descending(self):
         """Test that time steps are in descending order."""
@@ -183,7 +183,8 @@ class TestGetTimeSteps:
         time_steps = diff.get_time_steps(num_inference_steps=100)
 
         assert len(time_steps) == 101
-        assert time_steps[0].item() == 1000
+        # First step should be T-1 (0-indexed, so max index is 999 for T=1000)
+        assert time_steps[0].item() == 999
 
 
 class TestPSample:
@@ -305,14 +306,8 @@ class TestSample:
 
 
 class TestDDIMSample:
-    """Tests for ddim_sample (DDIM sampling).
+    """Tests for ddim_sample (DDIM sampling)."""
 
-    Note: Some DDIM tests are skipped due to an indexing issue in ddim_sample
-    where get_time_steps can return T but alphas_cumprod is indexed [0, T-1].
-    This should be fixed in the implementation.
-    """
-
-    @pytest.mark.skip(reason="DDIM has off-by-one indexing bug: time_steps can be T but alphas_cumprod is [0, T-1]")
     def test_ddim_sample_basic(self):
         """Test basic DDIM sampling."""
         diff = DiffusionUtils(T=100, device='cpu')
@@ -339,7 +334,6 @@ class TestDDIMSample:
 
         assert samples.shape == (4, 32, 2)
 
-    @pytest.mark.skip(reason="DDIM has off-by-one indexing bug")
     def test_ddim_sample_fewer_steps(self):
         """Test that DDIM can use fewer steps than T."""
         diff = DiffusionUtils(T=1000, device='cpu')
@@ -367,7 +361,6 @@ class TestDDIMSample:
 
         assert samples.shape == (2, 16, 2)
 
-    @pytest.mark.skip(reason="DDIM has off-by-one indexing bug")
     def test_ddim_sample_with_conditioning(self):
         """Test DDIM sampling with class conditioning."""
         diff = DiffusionUtils(T=50, device='cpu')
@@ -396,7 +389,6 @@ class TestDDIMSample:
 
         assert samples.shape == (3, 32, 2)
 
-    @pytest.mark.skip(reason="DDIM has off-by-one indexing bug")
     def test_ddim_sample_single_step(self):
         """Test DDIM with single inference step."""
         diff = DiffusionUtils(T=100, device='cpu')
@@ -423,7 +415,6 @@ class TestDDIMSample:
 
         assert samples.shape == (2, 16, 2)
 
-    @pytest.mark.skip(reason="DDIM has off-by-one indexing bug")
     def test_ddim_deterministic(self):
         """Test that DDIM is deterministic with same noise."""
         diff = DiffusionUtils(T=50, device='cpu')

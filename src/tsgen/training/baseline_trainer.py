@@ -12,7 +12,7 @@ from tsgen.training.base import BaseTrainer
 from tsgen.training.registry import TrainerRegistry
 
 
-@TrainerRegistry.register('gbm', 'bootstrap', 'multivariate_lognormal')
+@TrainerRegistry.register('gbm', 'bootstrap', 'multivariate_lognormal', 'multivariate_gbm')
 class BaselineTrainer(BaseTrainer):
     """
     Trainer for baseline models that use .fit() method.
@@ -35,7 +35,7 @@ class BaselineTrainer(BaseTrainer):
         Returns:
             Fitted model
         """
-        print(f"Fitting baseline model: {self.config.get('model_type')}")
+        print(f"Fitting baseline model: {self.config.model_type}")
         self.model.fit(dataloader)
         return self.model
 

@@ -12,41 +12,49 @@ from pathlib import Path
 
 from tsgen.train import train_model
 from tsgen.tracking.base import FileTracker
+from tsgen.config.schema import ExperimentConfig
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
 def pipeline_config():
     """Minimal config with DataPipeline."""
-    return {
-        'experiment_name': 'test_pipeline_training',
-        'model_type': 'unet',
-        'tickers': ['AAPL', 'MSFT'],
-        'start_date': '2024-01-01',
-        'end_date': '2024-12-31',
-        'sequence_length': 64,
-        'batch_size': 16,
-        'epochs': 2,  # Fast
-        'timesteps': 50,  # Fewer timesteps
-        'learning_rate': 1e-3,
-        'base_channels': 32,
-        'tracker': 'file',
-
-        # DataPipeline configuration
-        'DataPipeline': [
+    return ExperimentConfig(
+        experiment_name='test_pipeline_training',
+        model_type='unet',
+        tracker='file',
+        data={
+            'tickers': ['AAPL', 'MSFT'],
+            'start_date': '2024-01-01',
+            'end_date': '2024-12-31',
+            'sequence_length': 64,
+        },
+        training={
+            'batch_size': 16,
+            'epochs': 2,  # Fast
+            'timesteps': 50,  # Fewer timesteps
+            'learning_rate': 1e-3,
+        },
+        model={
+            'base_channels': 32,
+        },
+        # data_pipeline configuration
+        data_pipeline=[
             {'load_prices': {'column': 'adj_close'}},
             {'clean_data': {'strategy': 'ffill_drop'}},
             {'process_prices': {'fit': True}},
             {'create_windows': {'sequence_length': 64}},
             {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
         ]
-    }
+    )
 
 
 class TestTrainWithPipeline:
     """Tests for training with YAML-configured pipeline."""
 
     def test_train_with_pipeline_config(self, pipeline_config):
-        """Test that training works with DataPipeline config."""
+        """Test that training works with data_pipeline config."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = FileTracker(experiment_dir=tmpdir)
 
@@ -66,21 +74,26 @@ class TestTrainWithPipeline:
 
     def test_pipeline_with_split(self):
         """Test pipeline with train/test split."""
-        config = {
-            'experiment_name': 'test_split',
-            'model_type': 'unet',
-            'tickers': ['AAPL', 'MSFT'],
-            'start_date': '2024-01-01',
-            'end_date': '2024-12-31',
-            'sequence_length': 64,
-            'batch_size': 16,
-            'epochs': 1,
-            'timesteps': 50,
-            'learning_rate': 1e-3,
-            'base_channels': 32,
-
-            # DataPipeline with split_temporal step
-            'DataPipeline': [
+        config = ExperimentConfig(
+            experiment_name='test_split',
+            model_type='unet',
+            data={
+                'tickers': ['AAPL', 'MSFT'],
+                'start_date': '2024-01-01',
+                'end_date': '2024-12-31',
+                'sequence_length': 64,
+            },
+            training={
+                'batch_size': 16,
+                'epochs': 1,
+                'timesteps': 50,
+                'learning_rate': 1e-3,
+            },
+            model={
+                'base_channels': 32,
+            },
+            # data_pipeline with split_temporal step
+            data_pipeline=[
                 {'load_prices': {'column': 'adj_close'}},
                 {'clean_data': {'strategy': 'ffill_drop'}},
                 {'split_temporal': {'train_ratio': 0.8}},
@@ -88,7 +101,7 @@ class TestTrainWithPipeline:
                 {'create_windows': {'sequence_length': 64}},
                 {'create_dataloader': {'batch_size': 16, 'shuffle': True}}
             ]
-        }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = FileTracker(experiment_dir=tmpdir)
@@ -99,18 +112,18 @@ class TestTrainWithPipeline:
 
             assert model is not None
 
-    def test_pipeline_sets_num_features(self, pipeline_config):
-        """Test that num_features is set correctly in pipeline mode."""
+    def test_pipeline_creates_model_with_correct_features(self, pipeline_config):
+        """Test that the model is created with the correct feature count."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = FileTracker(experiment_dir=tmpdir)
 
             # Run training
             model, processor = train_model(pipeline_config, tracker)
 
-            # Verify num_features was set
-            assert 'num_features' in pipeline_config
-            assert pipeline_config['num_features'] == len(pipeline_config['tickers'])
-            assert pipeline_config['num_features'] == 2  # AAPL, MSFT
+            # Verify the model has the correct number of features
+            # (2 tickers = 2 features)
+            assert hasattr(model, 'features')
+            assert model.features == 2  # AAPL, MSFT
 
 
 if __name__ == "__main__":

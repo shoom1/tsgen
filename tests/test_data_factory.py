@@ -7,6 +7,8 @@ from tsgen.data.pipeline import (
 )
 from tsgen.data.processor import LogReturnProcessor
 
+pytestmark = pytest.mark.integration
+
 
 def test_load_prices():
     """Test loading price data."""

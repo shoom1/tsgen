@@ -4,26 +4,31 @@ Main training module with Trainer Registry Pattern.
 Uses Strategy + Registry + Factory patterns to dispatch to appropriate
 trainer based on model type.
 
-Data pipeline is configured via YAML using the DataPipeline key.
+Data pipeline is configured via YAML using the data_pipeline key.
 """
 
 import torch
 import tempfile
 import os
-from tsgen.models.factory import create_model
+from tsgen.models.registry import ModelRegistry
+from tsgen.config.schema import ExperimentConfig
 from tsgen.data.pipeline_builder import DataPipeline
 from tsgen.data.processor import LogReturnProcessor
 from tsgen.tracking.base import ExperimentTracker
 from tsgen.training.registry import TrainerRegistry
 from tsgen.training.checkpoint_utils import extract_epoch_from_checkpoint
 
-# Import trainers to trigger registration
+# Import models package to trigger ModelRegistry registration
+import tsgen.models
+
+# Import trainers to trigger TrainerRegistry registration
 from tsgen.training.diffusion_trainer import DiffusionTrainer
 from tsgen.training.vae_trainer import VAETrainer
 from tsgen.training.baseline_trainer import BaselineTrainer
 
 
-def train_model(config, tracker: ExperimentTracker):
+def train_model(config: ExperimentConfig, tracker: ExperimentTracker,
+                resume_from_checkpoint: str = None):
     """
     Main training entry point.
 
@@ -31,11 +36,12 @@ def train_model(config, tracker: ExperimentTracker):
     based on model type. Supports diffusion models (UNet, Transformer),
     VAE models (TimeVAE), and baseline models (GBM, Bootstrap, etc.).
 
-    Data pipeline is configured via YAML using config['DataPipeline'].
+    Data pipeline is configured via YAML using config.data_pipeline.
 
     Args:
-        config: Configuration dictionary containing hyperparameters
+        config: ExperimentConfig with validated hyperparameters
         tracker: Experiment tracker for logging metrics and artifacts
+        resume_from_checkpoint: Optional path to checkpoint file to resume from
 
     Returns:
         tuple: (trained_model, data_processor)
@@ -44,13 +50,13 @@ def train_model(config, tracker: ExperimentTracker):
     print(f"Training on {device}")
 
     # Log parameters
-    tracker.log_params(config)
+    tracker.log_params(config.to_dict())
 
     # Create processor
     processor = LogReturnProcessor()
 
-    # Resolve configuration sections
-    data_conf = config.get('data', config)
+    # Resolve data configuration
+    data_conf = config.get_data_config()
 
     # Build and execute YAML-configured data pipeline
     print("Using YAML-configured data pipeline")
@@ -58,56 +64,48 @@ def train_model(config, tracker: ExperimentTracker):
 
     # Execute pipeline with runtime parameters
     dataloader = pipeline.execute(
-        tickers=data_conf.get('tickers'),
-        start_date=data_conf.get('start_date'),
-        end_date=data_conf.get('end_date'),
-        column=data_conf.get('column', 'adj_close'),
-        db_path=data_conf.get('db_path'),
+        tickers=data_conf.tickers if data_conf.tickers else None,
+        start_date=data_conf.start_date,
+        end_date=data_conf.end_date,
+        column=data_conf.column,
+        db_path=data_conf.db_path,
         processor=processor
     )
 
     # Get feature count from config or processor
-    tickers = data_conf.get('tickers')
+    tickers = data_conf.tickers
     if tickers:
-        config['num_features'] = len(tickers)
+        features = len(tickers)
     elif hasattr(processor, 'n_features_'):
-         config['num_features'] = processor.n_features_
-         # Also patch tickers back into config if possible, or just leave it
-         # create_model logic needs features count, which we pass via tickers length usually
-         # but now we can pass num_features directly if factory supported it?
-         # My updated factory checks len(config['tickers']). 
-         # I should temporarily mock tickers list or update factory again? 
-         # Or just rely on features=None handling if models support it? 
-         # Mamba requires features int.
-         # So I'll fake the tickers list in config if it's missing but processor knows count
-         config['tickers'] = [f"Asset_{i}" for i in range(processor.n_features_)]
+        features = processor.n_features_
+    else:
+        features = None
 
-    # Create model
-    model = create_model(config)
+    # Create model via ModelRegistry
+    model = ModelRegistry.create(config, features=features)
 
     # Get appropriate trainer via registry (Factory Pattern)
-    model_type = config['model_type']
+    model_type = config.model_type
     print(f"Using trainer for model type: {model_type}")
     trainer = TrainerRegistry.get_trainer(model_type, model, config, tracker, device)
 
     # Load checkpoint if resuming
-    checkpoint_path = config.get('resume_from_checkpoint')
-    if checkpoint_path:
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if resume_from_checkpoint:
+        if not os.path.exists(resume_from_checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {resume_from_checkpoint}")
 
         print(f"\n{'='*80}")
-        print(f"Loading checkpoint from: {checkpoint_path}")
+        print(f"Loading checkpoint from: {resume_from_checkpoint}")
 
         # Load checkpoint and restore training state
         checkpoint = trainer.load_checkpoint(
-            checkpoint_path,
+            resume_from_checkpoint,
             optimizer=trainer.optimizer if hasattr(trainer, 'optimizer') else None
         )
 
-        # Set start epoch from checkpoint
+        # Set start epoch on training config
         start_epoch = checkpoint.get('epoch', 0)
-        config['start_epoch'] = start_epoch
+        trainer.training_config.start_epoch = start_epoch
 
         print(f"Resuming from epoch {start_epoch}")
         if 'step_count' in checkpoint:

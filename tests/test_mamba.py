@@ -2,7 +2,8 @@
 
 import pytest
 import torch
-from tsgen.models.factory import create_model
+from tsgen.models.registry import ModelRegistry
+from tsgen.config.schema import ExperimentConfig
 from tsgen.models.mamba import MambaDiffusion, MambaBlock, RMSNorm
 
 
@@ -53,29 +54,19 @@ def test_mamba_block_ssm():
     assert torch.all(torch.isfinite(out))
 
 
-def test_factory_mamba_creation():
-    """Test creating Mamba via factory."""
-    config = {
-        'model_type': 'mamba',
-        'data': {
-            'sequence_length': 32,
-            'tickers': ['AAPL', 'MSFT']
-        },
-        'model': {
-            'params': {
-                'dim': 64,
-                'depth': 2,
-                'd_state': 16,
-                'd_conv': 4,
-                'expand': 2
-            }
-        }
-    }
+def test_registry_mamba_creation():
+    """Test creating Mamba via ModelRegistry."""
+    config = ExperimentConfig(
+        model_type='mamba',
+        data={'tickers': ['AAPL', 'MSFT'], 'sequence_length': 32},
+        model={'dim': 64, 'depth': 2},
+    )
 
-    model = create_model(config)
+    model = ModelRegistry.create(config)
 
     assert isinstance(model, MambaDiffusion)
     assert model.dim == 64
+    assert model.features == 2
 
 
 def test_mamba_diffusion_forward_shape():

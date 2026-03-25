@@ -12,6 +12,8 @@ from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def synthetic_dataloader():
@@ -70,7 +72,7 @@ def test_multivariate_gbm_sample_independent(synthetic_dataloader):
     # Generate samples
     num_samples = 10
     seq_len = 64
-    samples = model.sample(num_samples, seq_len)
+    samples = model.generate(num_samples, seq_len)
 
     # Verify sample shape
     assert samples.shape == (num_samples, seq_len, 2)
@@ -89,10 +91,10 @@ def test_multivariate_gbm_reproducibility_independent():
 
     # Generate samples with same seed
     torch.manual_seed(42)
-    samples1 = model.sample(5, 32)
+    samples1 = model.generate(5, 32)
 
     torch.manual_seed(42)
-    samples2 = model.sample(5, 32)
+    samples2 = model.generate(5, 32)
 
     # Verify samples are identical
     assert torch.allclose(samples1, samples2)
@@ -130,7 +132,7 @@ def test_bootstrap_sample(synthetic_dataloader):
     # Generate samples
     num_samples = 10
     seq_len = 64
-    samples = model.sample(num_samples, seq_len)
+    samples = model.generate(num_samples, seq_len)
 
     # Verify sample shape
     assert samples.shape == (num_samples, seq_len, 2)
@@ -154,7 +156,7 @@ def test_bootstrap_sampling_from_history():
 
     # Generate sample
     torch.manual_seed(42)
-    sample = model.sample(1, 32)
+    sample = model.generate(1, 32)
 
     # Verify sample is valid
     assert sample.shape == (1, 32, 1)
@@ -170,10 +172,10 @@ def test_bootstrap_reproducibility():
 
     # Generate samples with same seed
     torch.manual_seed(42)
-    samples1 = model.sample(5, 64)
+    samples1 = model.generate(5, 64)
 
     torch.manual_seed(42)
-    samples2 = model.sample(5, 64)
+    samples2 = model.generate(5, 64)
 
     # Verify samples are identical
     assert torch.allclose(samples1, samples2)
@@ -190,10 +192,10 @@ def test_multivariate_gbm_vs_bootstrap_different_outputs(synthetic_dataloader):
 
     # Generate samples with same seed
     torch.manual_seed(42)
-    gbm_samples = gbm.sample(5, 64)
+    gbm_samples = gbm.generate(5, 64)
 
     torch.manual_seed(42)
-    bootstrap_samples = bootstrap.sample(5, 64)
+    bootstrap_samples = bootstrap.generate(5, 64)
 
     # Verify samples are different (models work differently)
     assert not torch.allclose(gbm_samples, bootstrap_samples, atol=0.1)
@@ -224,10 +226,10 @@ def test_baseline_models_save_load():
 
         # Verify sampling works
         torch.manual_seed(42)
-        samples1 = gbm.sample(3, 32)
+        samples1 = gbm.generate(3, 32)
 
         torch.manual_seed(42)
-        samples2 = loaded_gbm.sample(3, 32)
+        samples2 = loaded_gbm.generate(3, 32)
 
         assert torch.allclose(samples1, samples2)
 

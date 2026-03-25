@@ -9,8 +9,15 @@ Provides different tracking backends:
 """
 
 from tsgen.tracking.base import ExperimentTracker, NoOpTracker, ConsoleTracker, FileTracker, ArtifactType
-from tsgen.tracking.mlflow_tracker import MLFlowTracker
 from tsgen.tracking.factory import create_tracker
+
+
+def __getattr__(name):
+    if name == "MLFlowTracker":
+        from tsgen.tracking.mlflow_tracker import MLFlowTracker
+        return MLFlowTracker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Base classes
