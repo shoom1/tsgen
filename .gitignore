@@ -5,6 +5,8 @@ CLAUDE.md
 .gemini/
 
 # Project-specific directories
+changes/
+docs/
 logs/
 notes/
 reports/
