@@ -278,18 +278,25 @@ def create_windows(data, sequence_length, stride=1, mask=None):
             f"Need at least {sequence_length} data points."
         )
 
-    sequences = []
-    for i in range(0, len(data) - sequence_length + 1, stride):
-        sequences.append(data[i : i + sequence_length])
+    def _sliding_windows(arr, seq_len, step):
+        """Create sliding windows using stride tricks (zero-copy when stride=1)."""
+        n_windows = (len(arr) - seq_len) // step + 1
+        if step == 1 and arr.ndim == 2:
+            # Zero-copy strided view
+            shape = (n_windows, seq_len, arr.shape[1])
+            strides = (arr.strides[0], arr.strides[0], arr.strides[1])
+            view = np.lib.stride_tricks.as_strided(arr, shape=shape, strides=strides)
+            return view.copy()  # copy so the result owns its memory
+        # General case: index-based (handles stride > 1 efficiently)
+        starts = np.arange(n_windows) * step
+        indices = starts[:, None] + np.arange(seq_len)
+        return arr[indices]
 
-    result = np.array(sequences)
+    result = _sliding_windows(data, sequence_length, stride)
     print(f"Created {len(result)} windows of length {sequence_length} (stride={stride})")
 
     if mask is not None:
-        mask_sequences = []
-        for i in range(0, len(mask) - sequence_length + 1, stride):
-            mask_sequences.append(mask[i : i + sequence_length])
-        mask_result = np.array(mask_sequences)
+        mask_result = _sliding_windows(mask, sequence_length, stride)
         return result, mask_result
 
     return result

@@ -274,7 +274,6 @@ class TimeVAE(VAEModel):
         """Create TimeVAE from ExperimentConfig."""
         data = config.get_data_config()
         params = config.get_model_config()
-        features = features or len(data.tickers)
         return cls(
             features=features,
             sequence_length=data.sequence_length,

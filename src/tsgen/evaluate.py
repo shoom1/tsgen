@@ -29,7 +29,7 @@ from tsgen.data.pipeline import load_prices, clean_data, create_windows
 from tsgen.data.processor import DataProcessor
 from tsgen.tracking.base import ExperimentTracker
 from tsgen.evaluation import EvaluationPipeline, EvaluationResult
-from tsgen.config.schema import ExperimentConfig, DiffusionTrainingConfig
+from tsgen.config.schema import ExperimentConfig, DiffusionTrainingConfig, TRAINING_CONFIG_MAP, BaselineTrainingConfig
 
 
 def evaluate_model(
@@ -73,8 +73,8 @@ def evaluate_model(
     data_conf = config.get_data_config()
     tickers = data_conf.tickers
 
-    # Model Factory
-    model = ModelRegistry.create(config).to(device)
+    # Determine if this is a statistical (baseline) model before constructing
+    is_baseline = TRAINING_CONFIG_MAP.get(config.model_type) is BaselineTrainingConfig
 
     try:
         # Get artifact paths via tracker
@@ -91,11 +91,11 @@ def evaluate_model(
                 model_path = "model_final.pt"
                 processor_path = "processor.pkl"
 
-        # isinstance check for model loading only (serialization concern:
-        # StatisticalModel saves full object, DiffusionModel saves state_dict)
-        if isinstance(model, StatisticalModel):
+        # StatisticalModel saves full object; others save state_dict
+        if is_baseline:
             model = torch.load(model_path, map_location=device)
         else:
+            model = ModelRegistry.create(config).to(device)
             model.load_state_dict(torch.load(model_path, map_location=device))
 
         processor = DataProcessor.load(processor_path)

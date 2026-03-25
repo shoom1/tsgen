@@ -55,19 +55,8 @@ class UNet1D(DiffusionModel):
         self.final_conv = nn.Conv1d(base_channels, features, kernel_size=1)
 
     @classmethod
-    def from_config(cls, config, features=None):
-        """Create UNet1D from ExperimentConfig."""
-        data = config.get_data_config()
-        params = config.get_model_config()
-        diff = config.get_training_config()
-        features = features or len(data.tickers)
-        model = cls(
-            sequence_length=data.sequence_length,
-            features=features,
-            base_channels=params.base_channels,
-        )
-        model._apply_diffusion_config(diff)
-        return model
+    def _model_kwargs_from_config(cls, params) -> dict:
+        return {'base_channels': params.base_channels}
 
     def forward(self, x, t, y=None, mask=None):
         """

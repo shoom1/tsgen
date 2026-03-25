@@ -61,12 +61,38 @@ class DiffusionModel(BaseGenerativeModel):
     _timesteps: int = 1000
     _sampling_method: str = 'ddpm'
     _num_inference_steps: int = 50
+    _diff_utils = None
+    _diff_utils_device = None
 
     def _apply_diffusion_config(self, diff_config):
         """Apply diffusion config attributes from a DiffusionConfig object."""
         self._timesteps = diff_config.timesteps
         self._sampling_method = diff_config.sampling_method
         self._num_inference_steps = diff_config.num_inference_steps
+
+    @classmethod
+    def from_config(cls, config, features=None):
+        """Create diffusion model from ExperimentConfig (template method).
+
+        Subclasses override _model_kwargs_from_config() to specify
+        constructor arguments beyond sequence_length and features.
+        """
+        data = config.get_data_config()
+        params = config.get_model_config()
+        diff = config.get_training_config()
+        extra_kwargs = cls._model_kwargs_from_config(params)
+        model = cls(sequence_length=data.sequence_length, features=features, **extra_kwargs)
+        model._apply_diffusion_config(diff)
+        return model
+
+    @classmethod
+    def _model_kwargs_from_config(cls, params) -> dict:
+        """Return model-specific constructor kwargs from model config.
+
+        Override in subclasses to provide architecture-specific parameters.
+        Default implementation returns empty dict.
+        """
+        return {}
 
     @abstractmethod
     def forward(self, x: torch.Tensor, t: torch.Tensor,
@@ -102,7 +128,7 @@ class DiffusionModel(BaseGenerativeModel):
         from tsgen.models.diffusion import DiffusionUtils
         y = kwargs.get('y', None)
         # Cache DiffusionUtils to avoid recomputing alpha schedules
-        if not hasattr(self, '_diff_utils') or self._diff_utils_device != device:
+        if self._diff_utils is None or self._diff_utils_device != device:
             self._diff_utils = DiffusionUtils(T=self._timesteps, device=device)
             self._diff_utils_device = device
         image_size = (seq_len, self.features)

@@ -74,8 +74,6 @@ class DiffusionTrainingConfig(TrainingConfig):
     num_inference_steps: int = 50
     beta_start: float = 1e-4
     beta_end: float = 0.02
-    validation_interval: int = 0
-    num_validation_samples: int = 100
     classifier_free_guidance_probability: float = 0.0
 
     model_config = ConfigDict(extra='forbid')
@@ -263,6 +261,8 @@ class ExperimentConfig(BaseModel):
         Raises:
             ValueError: If model_type is not in MODEL_CONFIG_MAP
         """
+        if hasattr(self, '_cached_model_config'):
+            return self._cached_model_config
         config_cls = MODEL_CONFIG_MAP.get(self.model_type)
         if config_cls is None:
             raise ValueError(
@@ -270,7 +270,9 @@ class ExperimentConfig(BaseModel):
                 f"Known types: {list(MODEL_CONFIG_MAP.keys())}"
             )
         kwargs = self.model if isinstance(self.model, dict) else {}
-        return config_cls(**(kwargs or {}))
+        result = config_cls(**(kwargs or {}))
+        object.__setattr__(self, '_cached_model_config', result)
+        return result
 
     def get_training_config(self) -> TrainingConfig:
         """Get unified TrainingConfig, resolved to paradigm-specific subclass.
@@ -279,23 +281,27 @@ class ExperimentConfig(BaseModel):
         If self.training is a dict (or None), resolve via TRAINING_CONFIG_MAP.
         When no training section is provided, returns defaults for the paradigm.
         """
+        if hasattr(self, '_cached_training_config'):
+            return self._cached_training_config
+
         # Already resolved
         if isinstance(self.training, TrainingConfig):
-            return self.training
-
-        # Resolve via mapping
-        config_cls = TRAINING_CONFIG_MAP.get(self.model_type)
-        if config_cls is not None:
-            if isinstance(self.training, dict):
-                return config_cls(**self.training)
+            result = self.training
+        else:
+            # Resolve via mapping
+            config_cls = TRAINING_CONFIG_MAP.get(self.model_type)
+            if config_cls is not None:
+                if isinstance(self.training, dict):
+                    result = config_cls(**self.training)
+                else:
+                    result = config_cls()
+            elif isinstance(self.training, dict):
+                result = TrainingConfig(**self.training)
             else:
-                # No training section provided - use paradigm defaults
-                return config_cls()
+                result = TrainingConfig()
 
-        # Unknown model_type - fall back to base TrainingConfig
-        if isinstance(self.training, dict):
-            return TrainingConfig(**self.training)
-        return TrainingConfig()
+        object.__setattr__(self, '_cached_training_config', result)
+        return result
 
     def get_evaluation_config(self) -> EvaluationConfig:
         """Return the nested EvaluationConfig."""

@@ -93,6 +93,12 @@ class ModelRegistry:
                 f"Available: {list(cls._models.keys())}"
             )
 
+        # Resolve features centrally so individual from_config methods don't repeat this
+        if features is None:
+            data_conf = config.get_data_config()
+            if data_conf.tickers:
+                features = len(data_conf.tickers)
+
         return model_class.from_config(config, features=features)
 
     @classmethod

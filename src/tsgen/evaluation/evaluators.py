@@ -94,6 +94,8 @@ class StylizedFactsEvaluator(MetricEvaluator):
     ) -> Dict[str, float]:
         """Compute stylized facts metrics."""
         sf_metrics = calculate_stylized_facts(real_data, synthetic_data)
+        # Cache raw results for downstream plotting (avoids recomputation)
+        self.last_raw_results = sf_metrics
 
         return {
             "kurtosis_diff_mean": float(np.mean(sf_metrics['kurtosis_diff'])),
@@ -137,6 +139,8 @@ class CorrelationEvaluator(MetricEvaluator):
     ) -> Dict[str, float]:
         """Compute correlation structure metrics."""
         corr_metrics = compute_correlation_structure_metrics(real_data, synthetic_data)
+        # Cache raw results for downstream plotting (avoids recomputation)
+        self.last_raw_results = corr_metrics
 
         results = {
             "corr_frobenius_norm": float(corr_metrics['corr_frobenius_norm']),
@@ -317,19 +321,16 @@ def create_default_evaluators(config=None) -> list:
     Create default set of evaluators based on config.
 
     Args:
-        config: ExperimentConfig or optional configuration dictionary
+        config: ExperimentConfig or None
 
     Returns:
         List of MetricEvaluator instances
     """
-    # Normalize config to EvaluationConfig
+    from tsgen.config.schema import EvaluationConfig
+
     if config is not None and hasattr(config, 'get_evaluation_config'):
         eval_conf = config.get_evaluation_config()
-    elif isinstance(config, dict):
-        from tsgen.config.schema import EvaluationConfig
-        eval_conf = EvaluationConfig(**(config.get('evaluation', {})))
     else:
-        from tsgen.config.schema import EvaluationConfig
         eval_conf = EvaluationConfig()
 
     return [

@@ -11,7 +11,7 @@ import os
 import tempfile
 
 from tsgen.tracking.base import ExperimentTracker
-from tsgen.evaluation.evaluators import MetricEvaluator, create_default_evaluators
+from tsgen.evaluation.evaluators import MetricEvaluator, StylizedFactsEvaluator, CorrelationEvaluator, create_default_evaluators
 from tsgen.analysis.metrics import plot_stylized_facts, plot_correlation_structure
 
 
@@ -76,6 +76,7 @@ class EvaluationPipeline:
         """
         all_metrics = {}
         failed = {}
+        raw_results = {}
 
         for evaluator in self.evaluators:
             if self.verbose:
@@ -91,6 +92,10 @@ class EvaluationPipeline:
                 )
                 all_metrics.update(metrics)
 
+                # Collect raw results from evaluators that cache them
+                if hasattr(evaluator, 'last_raw_results'):
+                    raw_results[evaluator.name] = evaluator.last_raw_results
+
                 # Log metrics if tracker available
                 if self.tracker:
                     self.tracker.log_metrics(metrics)
@@ -105,6 +110,7 @@ class EvaluationPipeline:
 
         if failed:
             all_metrics['_failed_evaluators'] = failed
+        all_metrics['_raw_results'] = raw_results
 
         return all_metrics
 
@@ -166,9 +172,10 @@ class EvaluationResult:
         self.synthetic_data = synthetic_data
         self.tickers = tickers
 
-        # Cached intermediate results
-        self._stylized_facts = None
-        self._correlation_metrics = None
+        # Seed caches from evaluator raw results (avoids recomputation in generate_plots)
+        raw = metrics.get('_raw_results', {})
+        self._stylized_facts = raw.get('stylized_facts')
+        self._correlation_metrics = raw.get('correlation_structure')
 
     def generate_plots(
         self,

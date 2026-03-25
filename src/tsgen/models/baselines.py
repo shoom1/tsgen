@@ -27,8 +27,6 @@ class MultivariateGBM(StatisticalModel):
     @classmethod
     def from_config(cls, config, features=None):
         """Create MultivariateGBM from ExperimentConfig."""
-        data = config.get_data_config()
-        features = features or len(data.tickers)
         # Determine covariance mode based on model_type
         if config.model_type == 'gbm':
             full_covariance = False
@@ -254,7 +252,6 @@ class BootstrapGenerativeModel(StatisticalModel):
     def from_config(cls, config, features=None):
         """Create BootstrapGenerativeModel from ExperimentConfig."""
         data = config.get_data_config()
-        features = features or len(data.tickers)
         return cls(features=features, sequence_length=data.sequence_length)
 
     def __init__(self, features, sequence_length):

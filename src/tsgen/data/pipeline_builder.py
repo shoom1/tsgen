@@ -43,6 +43,10 @@ class PipelineStep:
     output_type: Optional[Type] = None
     required_params: List[str] = field(default_factory=list)
     optional_params: List[str] = field(default_factory=list)
+    _fn_params: frozenset = field(init=False, repr=False)
+
+    def __post_init__(self):
+        self._fn_params = frozenset(inspect.signature(self.fn).parameters)
 
     def __call__(self, data, **runtime_params):
         """Execute step with merged config and runtime params.
@@ -69,8 +73,7 @@ class PipelineStep:
             )
 
         # Extract only parameters that the function accepts
-        sig = inspect.signature(self.fn)
-        fn_params = {k: v for k, v in all_params.items() if k in sig.parameters}
+        fn_params = {k: v for k, v in all_params.items() if k in self._fn_params}
 
         # Execute function
         if data is None:

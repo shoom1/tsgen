@@ -46,24 +46,15 @@ class DiffusionTransformer(DiffusionModel):
         self.output_proj = nn.Linear(dim, features)
 
     @classmethod
-    def from_config(cls, config, features=None):
-        """Create DiffusionTransformer from ExperimentConfig."""
-        data = config.get_data_config()
-        params = config.get_model_config()
-        diff = config.get_training_config()
-        features = features or len(data.tickers)
-        model = cls(
-            sequence_length=data.sequence_length,
-            features=features,
-            dim=params.dim,
-            depth=params.depth,
-            heads=params.heads,
-            mlp_dim=params.mlp_dim,
-            dropout=params.dropout,
-            num_classes=params.num_classes,
-        )
-        model._apply_diffusion_config(diff)
-        return model
+    def _model_kwargs_from_config(cls, params) -> dict:
+        return {
+            'dim': params.dim,
+            'depth': params.depth,
+            'heads': params.heads,
+            'mlp_dim': params.mlp_dim,
+            'dropout': params.dropout,
+            'num_classes': params.num_classes,
+        }
 
     def forward(self, x, t, y=None, mask=None):
         """
