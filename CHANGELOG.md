@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-24
+
+### Changed - Breaking
+
+- **Composable Evaluation Pipeline**: Replaced monolithic `evaluate_model()` with pluggable `EvaluationPipeline` + `MetricEvaluator` classes
+  - Old: Single 300-line function with all metrics hardcoded inline (discriminator, stylized facts, correlation, distribution tests, TSTR, plotting all interleaved)
+  - New: `EvaluationPipeline` orchestrates independent `MetricEvaluator` subclasses (`StylizedFactsEvaluator`, `CorrelationEvaluator`, `DistributionTestEvaluator`, `DiscriminatorEvaluator`, `TSTREvaluator`)
+  - Evaluators are configurable per-experiment via `EvaluationPipeline.from_config()` or manually composed
+  - `EvaluationResult` container with `summary()` and `generate_plots()` for clean output
+  - New modules: `tsgen/evaluation/pipeline.py`, `tsgen/evaluation/evaluators.py`
+
+- **Typed Configuration System**: Replaced raw dict configs with Pydantic-validated `ExperimentConfig`
+  - All config access through typed accessors: `config.get_model_config()`, `config.get_training_config()`, `config.get_data_config()`, `config.get_evaluation_config()`
+  - Per-model configs: `UNetConfig`, `TransformerConfig`, `MambaConfig`, `TimeVAEConfig`, `BaselineModelConfig`
+  - Per-paradigm training configs: `DiffusionTrainingConfig`, `VAETrainingConfig`, `BaselineTrainingConfig`
+  - Config validation on load catches typos and invalid values with clear error messages
+
+- **Removed deprecated flat config fields**: Old flat keys (`epochs`, `learning_rate`, `timesteps`, etc.) at root level no longer supported — must use nested sections (`training:`, `model:`, `data:`)
+
+- **Removed old config classes**: Legacy `models/factory.py`, config shims, and `factory.py` compatibility layer removed
+
+### Added
+
+- **Model Base Class Hierarchy**: `GenerativeModel` → `DiffusionModel`, `VAEModel`, `StatisticalModel` with standardized `generate()` and `from_config()` interfaces
+- **ModelRegistry**: Decorator-based registration (`@ModelRegistry.register('unet')`) — replaces `create_model()` factory function
+
+### Improved
+
+- **Code Quality**:
+  - Deduplicated `from_config()` across models with config caching
+  - Optimized `create_windows()` with stride views
+  - Extracted shared helpers, removed dead code
+  - Fixed config mutation bugs in backtest and evaluation
+  - Fixed `.gitignore` to properly track `src/tsgen/data/` package
+
 ## [0.3.2] - 2025-12-16
 
 ### Added
