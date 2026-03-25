@@ -1,54 +1,37 @@
 # Config for MambaDiffusion Model
 
 # General experiment settings
-experiment:
-  name: "mamba_diffusion_experiment"
-  description: "Default configuration for MambaDiffusion model training and evaluation."
-  tracking: "console" # Options: 'console', 'file', 'mlflow'
-  seed: 42
+experiment_name: 'mamba_diffusion_experiment'
+description: 'Default configuration for MambaDiffusion model training and evaluation.'
 
-# Data settings
-data:
-  dataset_name: "synthetic_arma" # Replace with your actual dataset (e.g., 'yfinance', 'synthetic_garch')
-  sequence_length: 256 # Length of time series sequences
-  features: 1 # Number of features (e.g., number of stocks, 1 for univariate)
-  split_ratio: 0.8 # Train/test split ratio
-  batch_size: 64
-  num_workers: 0 # 0 for single-process loading, >0 for multi-process
-
-# Model settings
+# Model
 model_type: mamba
+
 model:
-  name: "MambaDiffusion"
-  params:
-    dim: 128            # Internal dimension of the Mamba blocks
-    depth: 4            # Number of Mamba layers
-    d_state: 16         # State dimension for the SSM (Selective Scan Machine)
-    d_conv: 4           # Kernel size for the 1D convolution in Mamba block
-    expand: 2           # Expansion factor for the inner dimension (d_inner = dim * expand)
-    num_classes: 0      # For conditional generation, if applicable
+  dim: 128            # Internal dimension of the Mamba blocks
+  depth: 4            # Number of Mamba layers
+  d_state: 16         # State dimension for the SSM (Selective Scan Machine)
+  d_conv: 4           # Kernel size for the 1D convolution in Mamba block
+  expand: 2           # Expansion factor for the inner dimension (d_inner = dim * expand)
+  num_classes: 0      # For conditional generation, if applicable
 
-# Diffusion process settings
-diffusion:
-  T: 1000             # Number of diffusion steps
-  beta_schedule: "linear" # Options: 'linear', 'cosine'
-  beta_start: 0.0001
-  beta_end: 0.02
-  num_inference_steps: 50 # Steps for DDIM sampling
+data:
+  sequence_length: 256  # Length of time series sequences
+  train_test_split: 0.8 # Train/test split ratio
 
-# Training settings
 training:
+  batch_size: 64
   epochs: 100
   learning_rate: 0.0002
-  optimizer: "Adam" # Options: "Adam", "AdamW"
-  loss_type: "l1" # Options: "l1", "l2", "huber"
-  clip_grad_norm: 1.0 # Gradient clipping
+  gradient_clip: 1.0
+  # Diffusion process settings (merged from diffusion: section)
+  timesteps: 1000
+  sampling_method: 'ddpm'
+  num_inference_steps: 50
 
-# Evaluation settings
 evaluation:
-  num_samples: 1000 # Number of synthetic samples to generate for evaluation
-  metrics:
-    - "discriminator_accuracy"
-    - "stylized_facts"
-    - "tstr"
-    - "distribution_tests"
+  num_samples: 1000
+
+# Extra fields (kept at root)
+seed: 42
+tracker: 'console'

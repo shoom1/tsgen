@@ -51,14 +51,13 @@ class VAETrainer(BaseTrainer):
         self.gradient_clip = self.training_config.gradient_clip
         self.checkpoint_interval = self.training_config.checkpoint_interval
 
-        # VAE-specific hyperparameters from typed config
-        vae_config = config.get_vae_config()
-        self.beta = vae_config.beta
-        self.use_annealing = vae_config.use_annealing
-        self.annealing_epochs = vae_config.annealing_epochs
-        self.use_free_bits = vae_config.use_free_bits
-        self.free_bits = vae_config.free_bits
-        self.teacher_forcing_ratio = vae_config.teacher_forcing_ratio
+        # VAE-specific hyperparameters from typed training config
+        self.beta = self.training_config.beta
+        self.use_annealing = self.training_config.use_annealing
+        self.annealing_epochs = self.training_config.annealing_epochs
+        self.use_free_bits = self.training_config.use_free_bits
+        self.free_bits = self.training_config.free_bits
+        self.teacher_forcing_ratio = self.training_config.teacher_forcing_ratio
 
         # Beta annealing schedule using typed epochs
         epochs = self.training_config.epochs

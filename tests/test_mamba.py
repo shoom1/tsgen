@@ -58,10 +58,8 @@ def test_registry_mamba_creation():
     """Test creating Mamba via ModelRegistry."""
     config = ExperimentConfig(
         model_type='mamba',
-        tickers=['AAPL', 'MSFT'],
-        sequence_length=32,
-        dim=64,
-        depth=2,
+        data={'tickers': ['AAPL', 'MSFT'], 'sequence_length': 32},
+        model={'dim': 64, 'depth': 2},
     )
 
     model = ModelRegistry.create(config)

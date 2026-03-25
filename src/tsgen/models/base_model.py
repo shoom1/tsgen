@@ -64,7 +64,7 @@ class DiffusionModel(BaseGenerativeModel):
 
     def _apply_diffusion_config(self, diff_config):
         """Apply diffusion config attributes from a DiffusionConfig object."""
-        self._timesteps = diff_config.time_steps
+        self._timesteps = diff_config.timesteps
         self._sampling_method = diff_config.sampling_method
         self._num_inference_steps = diff_config.num_inference_steps
 

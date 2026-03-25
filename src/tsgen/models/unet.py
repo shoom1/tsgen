@@ -58,8 +58,8 @@ class UNet1D(DiffusionModel):
     def from_config(cls, config, features=None):
         """Create UNet1D from ExperimentConfig."""
         data = config.get_data_config()
-        params = config.get_model_params_config()
-        diff = config.get_diffusion_config()
+        params = config.get_model_config()
+        diff = config.get_training_config()
         features = features or len(data.tickers)
         model = cls(
             sequence_length=data.sequence_length,

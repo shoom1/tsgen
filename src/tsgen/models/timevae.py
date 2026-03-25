@@ -273,7 +273,7 @@ class TimeVAE(VAEModel):
     def from_config(cls, config, features=None):
         """Create TimeVAE from ExperimentConfig."""
         data = config.get_data_config()
-        params = config.get_model_params_config()
+        params = config.get_model_config()
         features = features or len(data.tickers)
         return cls(
             features=features,

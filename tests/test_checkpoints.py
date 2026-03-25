@@ -36,10 +36,9 @@ def temp_dir():
 def sample_config():
     """Sample configuration for models."""
     return {
-        'sequence_length': 64,
-        'tickers': ['AAPL', 'MSFT'],
         'model_type': 'unet',
-        'base_channels': 32,
+        'data': {'sequence_length': 64, 'tickers': ['AAPL', 'MSFT']},
+        'model': {'base_channels': 32},
     }
 
 
@@ -79,12 +78,11 @@ def test_unet_save_load(sample_config, temp_dir):
 def test_transformer_save_load(sample_config, temp_dir):
     """Test Transformer model can be saved and loaded."""
     # Create transformer model
-    config = sample_config.copy()
-    config['model_type'] = 'transformer'
-    config['dim'] = 64
-    config['depth'] = 2
-    config['heads'] = 4
-    config['mlp_dim'] = 128
+    config = {
+        'model_type': 'transformer',
+        'data': {'sequence_length': 64, 'tickers': ['AAPL', 'MSFT']},
+        'model': {'dim': 64, 'depth': 2, 'heads': 4, 'mlp_dim': 128},
+    }
 
     model = ModelRegistry.create(ExperimentConfig(**config))
 
@@ -189,10 +187,9 @@ def test_checkpoint_directory_structure(temp_dir):
 
     # Save model checkpoint
     config = {
-        'sequence_length': 64,
-        'tickers': ['AAPL', 'MSFT'],
         'model_type': 'unet',
-        'base_channels': 32,
+        'data': {'sequence_length': 64, 'tickers': ['AAPL', 'MSFT']},
+        'model': {'base_channels': 32},
     }
     model = ModelRegistry.create(ExperimentConfig(**config))
 
@@ -261,10 +258,9 @@ def test_multiple_checkpoint_management(temp_dir):
     checkpoint_dir.mkdir()
 
     config = {
-        'sequence_length': 64,
-        'tickers': ['AAPL', 'MSFT'],
         'model_type': 'unet',
-        'base_channels': 32,
+        'data': {'sequence_length': 64, 'tickers': ['AAPL', 'MSFT']},
+        'model': {'base_channels': 32},
     }
 
     # Save multiple checkpoints
@@ -293,10 +289,9 @@ def test_multiple_checkpoint_management(temp_dir):
 def test_checkpoint_with_optimizer_state(temp_dir):
     """Test saving checkpoint with optimizer state."""
     config = {
-        'sequence_length': 64,
-        'tickers': ['AAPL', 'MSFT'],
         'model_type': 'unet',
-        'base_channels': 32,
+        'data': {'sequence_length': 64, 'tickers': ['AAPL', 'MSFT']},
+        'model': {'base_channels': 32},
     }
 
     # Create model and optimizer

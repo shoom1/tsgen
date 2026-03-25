@@ -26,8 +26,10 @@ def sample_config_file(temp_dir):
     config = {
         'experiment_name': 'test_experiment',
         'model_type': 'unet',
-        'sequence_length': 64,
-        'tickers': ['AAPL', 'MSFT'],
+        'data': {
+            'sequence_length': 64,
+            'tickers': ['AAPL', 'MSFT'],
+        },
         'tracker': 'console',
     }
     config_path = os.path.join(temp_dir, 'test_config.yaml')
@@ -44,8 +46,8 @@ def test_load_config(sample_config_file):
     assert isinstance(config, ExperimentConfig)
     assert config.experiment_name == 'test_experiment'
     assert config.model_type == 'unet'
-    assert config.sequence_length == 64
-    assert config.tickers == ['AAPL', 'MSFT']
+    assert config.data.sequence_length == 64
+    assert config.data.tickers == ['AAPL', 'MSFT']
 
 
 def test_load_config_invalid_path():

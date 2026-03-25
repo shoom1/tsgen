@@ -23,17 +23,22 @@ def pipeline_config():
     return ExperimentConfig(
         experiment_name='test_pipeline_training',
         model_type='unet',
-        tickers=['AAPL', 'MSFT'],
-        start_date='2024-01-01',
-        end_date='2024-12-31',
-        sequence_length=64,
-        batch_size=16,
-        epochs=2,  # Fast
-        timesteps=50,  # Fewer timesteps
-        learning_rate=1e-3,
-        base_channels=32,
         tracker='file',
-
+        data={
+            'tickers': ['AAPL', 'MSFT'],
+            'start_date': '2024-01-01',
+            'end_date': '2024-12-31',
+            'sequence_length': 64,
+        },
+        training={
+            'batch_size': 16,
+            'epochs': 2,  # Fast
+            'timesteps': 50,  # Fewer timesteps
+            'learning_rate': 1e-3,
+        },
+        model={
+            'base_channels': 32,
+        },
         # data_pipeline configuration
         data_pipeline=[
             {'load_prices': {'column': 'adj_close'}},
@@ -72,16 +77,21 @@ class TestTrainWithPipeline:
         config = ExperimentConfig(
             experiment_name='test_split',
             model_type='unet',
-            tickers=['AAPL', 'MSFT'],
-            start_date='2024-01-01',
-            end_date='2024-12-31',
-            sequence_length=64,
-            batch_size=16,
-            epochs=1,
-            timesteps=50,
-            learning_rate=1e-3,
-            base_channels=32,
-
+            data={
+                'tickers': ['AAPL', 'MSFT'],
+                'start_date': '2024-01-01',
+                'end_date': '2024-12-31',
+                'sequence_length': 64,
+            },
+            training={
+                'batch_size': 16,
+                'epochs': 1,
+                'timesteps': 50,
+                'learning_rate': 1e-3,
+            },
+            model={
+                'base_channels': 32,
+            },
             # data_pipeline with split_temporal step
             data_pipeline=[
                 {'load_prices': {'column': 'adj_close'}},

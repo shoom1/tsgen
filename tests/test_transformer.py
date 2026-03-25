@@ -8,11 +8,8 @@ def test_registry_transformer_creation():
     """Test creating Transformer via ModelRegistry."""
     config = ExperimentConfig(
         model_type='transformer',
-        sequence_length=32,
-        tickers=['AAPL'],
-        dim=32,
-        depth=2,
-        heads=2,
+        data={'tickers': ['AAPL'], 'sequence_length': 32},
+        model={'dim': 32, 'depth': 2, 'heads': 2},
     )
 
     model = ModelRegistry.create(config)

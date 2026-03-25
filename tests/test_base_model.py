@@ -81,9 +81,8 @@ def test_from_config_on_all_models():
 
     config = ExperimentConfig(
         model_type='unet',
-        tickers=['A', 'B'],
-        sequence_length=16,
-        base_channels=32,
+        data={'tickers': ['A', 'B'], 'sequence_length': 16},
+        model={'base_channels': 32},
     )
 
     model = ModelRegistry.create(config)

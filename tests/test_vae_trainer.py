@@ -46,10 +46,12 @@ def basic_config(tmpdir):
     """Create basic training configuration."""
     return ExperimentConfig(
         model_type='timevae',
-        epochs=3,
-        learning_rate=1e-3,
-        vae_beta=1.0,
-        vae_use_annealing=False,
+        training={
+            'epochs': 3,
+            'learning_rate': 1e-3,
+            'beta': 1.0,
+            'use_annealing': False,
+        },
         output_dir=str(tmpdir),
     )
 
@@ -59,11 +61,13 @@ def annealing_config(tmpdir):
     """Create configuration with beta annealing."""
     return ExperimentConfig(
         model_type='timevae',
-        epochs=10,
-        learning_rate=1e-3,
-        vae_beta=2.0,
-        vae_use_annealing=True,
-        vae_annealing_epochs=5,
+        training={
+            'epochs': 10,
+            'learning_rate': 1e-3,
+            'beta': 2.0,
+            'use_annealing': True,
+            'annealing_epochs': 5,
+        },
         output_dir=str(tmpdir),
     )
 
@@ -131,10 +135,12 @@ class TestTrainVAEConfiguration:
         """Test that custom learning rate is used."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=2,
-            learning_rate=5e-4,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 2,
+                'learning_rate': 5e-4,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -153,12 +159,21 @@ class TestTrainVAEConfiguration:
 
         assert trained_model is not None
 
-    def test_fixed_beta(self, sample_model, sample_dataloader, basic_config, device, tmpdir):
+    def test_fixed_beta(self, sample_model, sample_dataloader, device, tmpdir):
         """Test training with fixed beta value."""
-        basic_config.vae_beta = 0.5
+        config = ExperimentConfig(
+            model_type='timevae',
+            training={
+                'epochs': 3,
+                'learning_rate': 1e-3,
+                'beta': 0.5,
+                'use_annealing': False,
+            },
+            output_dir=str(tmpdir),
+        )
         tracker = NoOpTracker()
 
-        trained_model = VAETrainer(sample_model, basic_config, tracker, device).train(sample_dataloader)
+        trained_model = VAETrainer(sample_model, config, tracker, device).train(sample_dataloader)
 
         assert trained_model is not None
 
@@ -166,10 +181,12 @@ class TestTrainVAEConfiguration:
         """Test that default learning rate is used when not specified."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=2,
-            # No learning_rate specified (uses default)
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 2,
+                # No learning_rate specified (uses default)
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -224,16 +241,18 @@ class TestTrainVAETracking:
 
         # Check that epoch metrics were logged
         epoch_metrics = [c for c in calls if 'epoch_loss' in c[0]]
-        assert len(epoch_metrics) == basic_config.epochs
+        assert len(epoch_metrics) == basic_config.get_training_config().epochs
 
     def test_tracks_artifacts(self, sample_model, sample_dataloader, device, tmpdir):
         """Test that checkpoints are tracked as artifacts."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=10,  # Need 10 epochs to trigger checkpoint saving
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 10,  # Need 10 epochs to trigger checkpoint saving
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -277,10 +296,12 @@ class TestTrainVAEGradientFlow:
         """Test that loss generally decreases over training."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=5,
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 5,
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -333,17 +354,19 @@ class TestTrainVAEWithBetaAnnealing:
                 epoch_betas.append(beta)
 
         # First beta should be less than max beta
-        assert epoch_betas[0] < annealing_config.vae_beta
+        assert epoch_betas[0] < annealing_config.get_training_config().beta
 
     def test_beta_reaches_max_after_warmup(self, sample_model, sample_dataloader, device, tmpdir):
         """Test that beta reaches max value after warmup."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=10,
-            learning_rate=1e-3,
-            vae_beta=2.0,
-            vae_use_annealing=True,
-            vae_annealing_epochs=3,
+            training={
+                'epochs': 10,
+                'learning_rate': 1e-3,
+                'beta': 2.0,
+                'use_annealing': True,
+                'annealing_epochs': 3,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -360,12 +383,13 @@ class TestTrainVAEWithBetaAnnealing:
 
         tracker.log_metrics = mock_log_metrics
 
+        training_cfg = config.get_training_config()
         VAETrainer(sample_model, config, tracker, device).train(sample_dataloader)
 
         # After warmup epochs, beta should be at max
-        later_betas = [beta for epoch, beta in beta_values if epoch > config.vae_annealing_epochs]
+        later_betas = [beta for epoch, beta in beta_values if epoch > training_cfg.annealing_epochs]
         if later_betas:
-            assert all(abs(beta - config.vae_beta) < 0.01 for beta in later_betas)
+            assert all(abs(beta - training_cfg.beta) < 0.01 for beta in later_betas)
 
 
 class TestTrainVAEEdgeCases:
@@ -375,10 +399,12 @@ class TestTrainVAEEdgeCases:
         """Test training with single epoch."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=1,
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 1,
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -396,10 +422,12 @@ class TestTrainVAEEdgeCases:
 
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=2,
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 2,
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -417,10 +445,12 @@ class TestTrainVAEEdgeCases:
 
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=2,
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 2,
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
@@ -434,10 +464,12 @@ class TestTrainVAEEdgeCases:
         """Test that checkpoint is logged at final epoch."""
         config = ExperimentConfig(
             model_type='timevae',
-            epochs=5,  # Not a multiple of 10
-            learning_rate=1e-3,
-            vae_beta=1.0,
-            vae_use_annealing=False,
+            training={
+                'epochs': 5,  # Not a multiple of 10
+                'learning_rate': 1e-3,
+                'beta': 1.0,
+                'use_annealing': False,
+            },
             output_dir=str(tmpdir),
         )
         tracker = NoOpTracker()
