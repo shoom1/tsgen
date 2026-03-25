@@ -29,7 +29,7 @@ from tsgen.data.pipeline import load_prices, clean_data, create_windows
 from tsgen.data.processor import DataProcessor
 from tsgen.tracking.base import ExperimentTracker
 from tsgen.evaluation import EvaluationPipeline, EvaluationResult
-from tsgen.config.schema import ExperimentConfig
+from tsgen.config.schema import ExperimentConfig, DiffusionTrainingConfig
 
 
 def evaluate_model(
@@ -109,8 +109,8 @@ def evaluate_model(
         raise
 
     # Resolve diffusion config
-    diff_conf = config.get_diffusion_config()
-    timesteps = diff_conf.time_steps
+    training_conf = config.get_training_config()
+    timesteps = training_conf.timesteps if isinstance(training_conf, DiffusionTrainingConfig) else 1000
 
     # Handle tickers recovery from processor
     if not tickers:
@@ -127,8 +127,8 @@ def evaluate_model(
     print(f"Generating {num_samples} synthetic samples...")
 
     # Conditional Generation Setup (for class-conditioned models)
-    model_params = config.get_model_params_config()
-    num_classes = model_params.num_classes
+    model_conf = config.get_model_config()
+    num_classes = getattr(model_conf, 'num_classes', 0)
     y_sampling = None
     if num_classes > 0:
         y_sampling = torch.randint(0, num_classes, (num_samples,), device=device).long()

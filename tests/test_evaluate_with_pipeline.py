@@ -21,16 +21,24 @@ def pipeline_config():
     return ExperimentConfig(
         experiment_name='test_eval_pipeline',
         model_type='unet',
-        tickers=['AAPL', 'MSFT'],
-        start_date='2024-01-01',
-        end_date='2024-12-31',
-        sequence_length=64,
-        batch_size=16,
-        epochs=2,
-        timesteps=50,
-        learning_rate=1e-3,
-        base_channels=32,
-        num_samples=50,  # For evaluation
+        data={
+            'tickers': ['AAPL', 'MSFT'],
+            'start_date': '2024-01-01',
+            'end_date': '2024-12-31',
+            'sequence_length': 64,
+        },
+        training={
+            'epochs': 2,
+            'timesteps': 50,
+            'batch_size': 16,
+            'learning_rate': 1e-3,
+        },
+        model={
+            'base_channels': 32,
+        },
+        evaluation={
+            'num_samples': 50,
+        },
 
         # data_pipeline configuration
         data_pipeline=[
