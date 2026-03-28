@@ -29,6 +29,28 @@ class TestDataConfig:
         with pytest.raises(ValidationError):
             DataConfig(train_test_split=1.5)
 
+    def test_scaling_default(self):
+        c = DataConfig()
+        assert c.scaling == 'global'
+        assert c.min_periods == 60
+
+    def test_scaling_expanding(self):
+        c = DataConfig(scaling='expanding', min_periods=30)
+        assert c.scaling == 'expanding'
+        assert c.min_periods == 30
+
+    def test_invalid_scaling(self):
+        with pytest.raises(ValidationError):
+            DataConfig(scaling='invalid')
+
+    def test_invalid_min_periods(self):
+        with pytest.raises(ValidationError):
+            DataConfig(min_periods=1)
+
+    def test_invalid_min_periods_zero(self):
+        with pytest.raises(ValidationError):
+            DataConfig(min_periods=0)
+
 
 class TestTrainingConfigs:
     def test_base_defaults(self):

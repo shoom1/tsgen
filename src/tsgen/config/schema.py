@@ -19,6 +19,8 @@ class DataConfig(BaseModel):
     column: str = 'adj_close'
     db_path: Optional[str] = None
     train_test_split: Optional[float] = None
+    scaling: Literal['global', 'expanding'] = 'global'
+    min_periods: int = 60
 
     @field_validator('sequence_length')
     @classmethod
@@ -32,6 +34,13 @@ class DataConfig(BaseModel):
     def validate_split_ratio(cls, v):
         if v is not None and not (0 < v < 1):
             raise ValueError('train_test_split must be between 0 and 1')
+        return v
+
+    @field_validator('min_periods')
+    @classmethod
+    def validate_min_periods(cls, v):
+        if v < 2:
+            raise ValueError('min_periods must be at least 2')
         return v
 
 
