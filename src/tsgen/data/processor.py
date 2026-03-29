@@ -55,6 +55,8 @@ class LogReturnProcessor(DataProcessor):
         self.min_periods = min_periods
         self.scaler = StandardScaler()
         self._fitted_expanding = False
+        self.expanding_means_ = None
+        self.expanding_stds_ = None
 
     def _compute_masked_log_returns(self, df, mask):
         """
@@ -94,29 +96,113 @@ class LogReturnProcessor(DataProcessor):
             log_returns_array, mask_array = self._compute_masked_log_returns(df, mask)
             mask_bool = mask_array.astype(bool)
 
-            # Compute mean and std per feature using only valid values
-            means = []
-            stds = []
-            for i in range(log_returns_array.shape[1]):
-                valid_values = log_returns_array[mask_bool[:, i], i]
-                if len(valid_values) > 0:
-                    means.append(np.mean(valid_values))
-                    stds.append(np.std(valid_values) if len(valid_values) > 1 else 1.0)
-                else:
-                    means.append(0.0)
-                    stds.append(1.0)
+            if self.scaling == 'expanding':
+                self._fit_expanding_masked(log_returns_array, mask_bool)
+            else:
+                # Compute mean and std per feature using only valid values
+                means = []
+                stds = []
+                for i in range(log_returns_array.shape[1]):
+                    valid_values = log_returns_array[mask_bool[:, i], i]
+                    if len(valid_values) > 0:
+                        means.append(np.mean(valid_values))
+                        stds.append(np.std(valid_values) if len(valid_values) > 1 else 1.0)
+                    else:
+                        means.append(0.0)
+                        stds.append(1.0)
 
-            # Set scaler parameters manually
-            self.scaler.mean_ = np.array(means)
-            self.scaler.scale_ = np.array(stds)
-            self.scaler.var_ = self.scaler.scale_ ** 2
-            self.scaler.n_features_in_ = log_returns_array.shape[1]
-            self.scaler.n_samples_seen_ = mask_bool.sum(axis=0)
+                # Set scaler parameters manually
+                self.scaler.mean_ = np.array(means)
+                self.scaler.scale_ = np.array(stds)
+                self.scaler.var_ = self.scaler.scale_ ** 2
+                self.scaler.n_features_in_ = log_returns_array.shape[1]
+                self.scaler.n_samples_seen_ = mask_bool.sum(axis=0)
         else:
             # Compute log returns: ln(P_t / P_{t-1})
             log_returns = np.log(df / df.shift(1))
             log_returns = log_returns.dropna()
-            self.scaler.fit(log_returns.values)
+            log_returns_array = log_returns.values
+
+            if self.scaling == 'expanding':
+                self._fit_expanding(log_returns_array)
+            else:
+                self.scaler.fit(log_returns_array)
+
+    def _fit_expanding(self, log_returns):
+        """Compute expanding-window mean and std for each timestep."""
+        T, F = log_returns.shape
+
+        if self.min_periods >= T:
+            raise ValueError(
+                f"min_periods ({self.min_periods}) must be less than "
+                f"the number of returns ({T})"
+            )
+
+        # Expanding mean and std using cumulative sums (ddof=0 to match StandardScaler)
+        cumsum = np.cumsum(log_returns, axis=0)
+        cumsum_sq = np.cumsum(log_returns ** 2, axis=0)
+        counts = np.arange(1, T + 1, dtype=float)[:, None]  # (T, 1)
+
+        expanding_means = cumsum / counts
+        # Population variance (ddof=0): Var = E[X^2] - E[X]^2
+        expanding_var = cumsum_sq / counts - expanding_means ** 2
+        # Row 0 has count=1: variance is 0, set to 1.0 as fallback
+        expanding_var[0] = 1.0
+        expanding_var = np.maximum(expanding_var, 0.0)  # Numerical guard
+        expanding_stds = np.sqrt(expanding_var)
+        expanding_stds = np.maximum(expanding_stds, 1e-8)  # Prevent div-by-zero
+
+        self.expanding_means_ = expanding_means
+        self.expanding_stds_ = expanding_stds
+
+        # Set scaler to final (converged) statistics for inverse_transform
+        self.scaler.mean_ = expanding_means[-1]
+        self.scaler.scale_ = expanding_stds[-1]
+        self.scaler.var_ = self.scaler.scale_ ** 2
+        self.scaler.n_features_in_ = F
+        self.scaler.n_samples_seen_ = T
+
+        self._fitted_expanding = True
+
+    def _fit_expanding_masked(self, log_returns, mask_bool):
+        """Compute expanding-window mean and std with masked data."""
+        T, F = log_returns.shape
+
+        if self.min_periods >= T:
+            raise ValueError(
+                f"min_periods ({self.min_periods}) must be less than "
+                f"the number of returns ({T})"
+            )
+
+        # Use masked values (set invalid to 0 for cumsum)
+        masked_returns = log_returns * mask_bool
+        cumsum = np.cumsum(masked_returns, axis=0)
+        cumsum_sq = np.cumsum((masked_returns ** 2), axis=0)
+        counts = np.cumsum(mask_bool.astype(float), axis=0)
+        counts_safe = np.maximum(counts, 1.0)
+
+        expanding_means = cumsum / counts_safe
+        # Population variance (ddof=0) to match StandardScaler
+        expanding_var = cumsum_sq / counts_safe - expanding_means ** 2
+        expanding_var = np.maximum(expanding_var, 0.0)
+        expanding_stds = np.sqrt(expanding_var)
+
+        # Fallback: where count < 2, use defaults
+        no_data = counts < 2
+        expanding_means[no_data] = 0.0
+        expanding_stds[no_data] = 1.0
+        expanding_stds = np.maximum(expanding_stds, 1e-8)
+
+        self.expanding_means_ = expanding_means
+        self.expanding_stds_ = expanding_stds
+
+        self.scaler.mean_ = expanding_means[-1]
+        self.scaler.scale_ = expanding_stds[-1]
+        self.scaler.var_ = self.scaler.scale_ ** 2
+        self.scaler.n_features_in_ = F
+        self.scaler.n_samples_seen_ = counts[-1]
+
+        self._fitted_expanding = True
 
     def transform(self, df: pd.DataFrame, mask: pd.DataFrame = None):
         """
