@@ -49,9 +49,12 @@ class LogReturnProcessor(DataProcessor):
     - fit() fits the scaler only on valid (non-masked) values
     - transform() returns (data, mask) tuple where mask propagates NaN positions
     """
-    def __init__(self):
+    def __init__(self, scaling='global', min_periods=60):
         super().__init__()
+        self.scaling = scaling
+        self.min_periods = min_periods
         self.scaler = StandardScaler()
+        self._fitted_expanding = False
 
     def _compute_masked_log_returns(self, df, mask):
         """
