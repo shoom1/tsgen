@@ -52,11 +52,14 @@ def train_model(config: ExperimentConfig, tracker: ExperimentTracker,
     # Log parameters
     tracker.log_params(config.to_dict())
 
-    # Create processor
-    processor = LogReturnProcessor()
-
     # Resolve data configuration
     data_conf = config.get_data_config()
+
+    # Create processor with scaling config
+    processor = LogReturnProcessor(
+        scaling=data_conf.scaling,
+        min_periods=data_conf.min_periods,
+    )
 
     # Build and execute YAML-configured data pipeline
     print("Using YAML-configured data pipeline")
