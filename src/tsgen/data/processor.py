@@ -215,6 +215,12 @@ class LogReturnProcessor(DataProcessor):
         Returns:
             np.ndarray: Scaled log returns (time_steps-1, features)
             tuple[np.ndarray, np.ndarray]: (data, mask) if mask provided
+
+        Notes:
+            When scaling='expanding' and _fitted_expanding=True (training data),
+            uses per-timestep causal statistics and drops the first min_periods rows,
+            then resets _fitted_expanding to False. Subsequent calls (test/eval data)
+            fall back to converged global stats via scaler.transform().
         """
         if self.scaler is None or not hasattr(self.scaler, 'mean_'):
             raise ValueError("Processor not fitted. Call fit() first.")
@@ -222,15 +228,26 @@ class LogReturnProcessor(DataProcessor):
         if mask is not None:
             log_returns_array, mask_array = self._compute_masked_log_returns(df, mask)
 
-            scaled_returns = self.scaler.transform(log_returns_array)
-            scaled_returns = scaled_returns * mask_array
-
-            return scaled_returns, mask_array
+            if self.scaling == 'expanding' and self._fitted_expanding:
+                scaled_returns = (log_returns_array - self.expanding_means_) / self.expanding_stds_
+                scaled_returns = scaled_returns * mask_array
+                self._fitted_expanding = False
+                return scaled_returns[self.min_periods:], mask_array[self.min_periods:]
+            else:
+                scaled_returns = self.scaler.transform(log_returns_array)
+                scaled_returns = scaled_returns * mask_array
+                return scaled_returns, mask_array
         else:
-            # Compute log returns: ln(P_t / P_{t-1})
             log_returns = np.log(df / df.shift(1))
             log_returns = log_returns.dropna()
-            return self.scaler.transform(log_returns.values)
+            log_returns_array = log_returns.values
+
+            if self.scaling == 'expanding' and self._fitted_expanding:
+                scaled_returns = (log_returns_array - self.expanding_means_) / self.expanding_stds_
+                self._fitted_expanding = False
+                return scaled_returns[self.min_periods:]
+            else:
+                return self.scaler.transform(log_returns_array)
 
     def validate_variance(self, data: np.ndarray, target_std: float = 1.0, tolerance: float = 0.2):
         """

@@ -93,3 +93,71 @@ class TestExpandingFit:
         df = _make_price_df(100, 2)
         p.fit(df)
         assert not hasattr(p, 'expanding_means_') or p.expanding_means_ is None
+
+
+class TestExpandingTransform:
+    def test_output_shorter_by_min_periods(self):
+        df = _make_price_df(100, 2)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        result = p.transform(df)
+        # Global would be 99 rows; expanding drops first 10
+        assert result.shape == (89, 2)
+
+    def test_output_is_causal(self):
+        """Each z-score uses only past data — verify first valid row."""
+        df = _make_price_df(100, 2)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        result = p.transform(df)
+
+        # Manually compute what the first output row should be
+        log_returns = np.log(df.values[1:] / df.values[:-1])
+        # Row index 10 in log_returns (first row after burn-in)
+        r = log_returns[10]
+        mu = np.mean(log_returns[:11], axis=0)  # mean of rows 0..10
+        sigma = np.std(log_returns[:11], axis=0, ddof=0)  # population std to match StandardScaler
+        expected = (r - mu) / sigma
+        np.testing.assert_allclose(result[0], expected, atol=1e-10)
+
+    def test_test_data_falls_back_to_global(self):
+        """transform() on test data (after fit) uses converged stats."""
+        df = _make_price_df(200, 2)
+        train_df = df.iloc[:160]
+        test_df = df.iloc[160:]
+
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(train_df)
+        train_result = p.transform(train_df)  # Uses expanding arrays
+
+        # Now transform test data — should use converged global stats
+        test_result = p.transform(test_df)
+        assert test_result.shape == (39, 2)  # 40 rows - 1 for log return
+
+        # Verify it matches what global scaling would produce
+        log_returns_test = np.log(test_df.values[1:] / test_df.values[:-1])
+        expected = (log_returns_test - p.scaler.mean_) / p.scaler.scale_
+        np.testing.assert_allclose(test_result, expected, atol=1e-10)
+
+    def test_flag_reset_after_transform(self):
+        """_fitted_expanding flag resets after training transform."""
+        df = _make_price_df(100, 2)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        assert p._fitted_expanding is True
+        p.transform(df)
+        assert p._fitted_expanding is False
+
+    def test_global_mode_unchanged(self):
+        """Global transform produces same output as before."""
+        df = _make_price_df(100, 2)
+
+        p_old = LogReturnProcessor()
+        p_old.fit(df)
+        result_old = p_old.transform(df)
+
+        p_new = LogReturnProcessor(scaling='global')
+        p_new.fit(df)
+        result_new = p_new.transform(df)
+
+        np.testing.assert_array_equal(result_old, result_new)
