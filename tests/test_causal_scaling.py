@@ -161,3 +161,107 @@ class TestExpandingTransform:
         result_new = p_new.transform(df)
 
         np.testing.assert_array_equal(result_old, result_new)
+
+
+class TestEdgeCases:
+    def test_single_feature(self):
+        df = _make_price_df(100, 1)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        result = p.transform(df)
+        assert result.shape == (89, 1)
+        assert not np.any(np.isnan(result))
+
+    def test_min_periods_equals_data_length_raises(self):
+        df = _make_price_df(50, 2)  # 49 returns
+        p = LogReturnProcessor(scaling='expanding', min_periods=49)
+        with pytest.raises(ValueError, match="min_periods"):
+            p.fit(df)
+
+    def test_masked_expanding_output_shape(self):
+        """Masked expanding transform should trim by min_periods."""
+        df = _make_price_df(100, 2)
+        mask = pd.DataFrame(np.ones_like(df.values), columns=df.columns)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df, mask=mask)
+        result, mask_out = p.transform(df, mask=mask)
+        assert result.shape == (89, 2)  # 99 returns - 10 burn-in
+        assert mask_out.shape == (89, 2)
+
+    def test_masked_expanding_all_nan_column(self):
+        """Feature with all NaN should fall back to mean=0, std=1."""
+        df = pd.DataFrame({
+            'A': np.exp(np.cumsum(np.random.default_rng(42).normal(0, 0.01, 100))),
+            'B': np.exp(np.cumsum(np.random.default_rng(43).normal(0, 0.01, 100))),
+        })
+        mask = pd.DataFrame({
+            'A': np.ones(100),
+            'B': np.zeros(100),  # All masked
+        })
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df, mask=mask)
+        result, mask_out = p.transform(df, mask=mask)
+
+        # Column B should be all zeros (masked out) — no NaN/Inf
+        assert not np.any(np.isnan(result))
+        assert not np.any(np.isinf(result))
+
+
+class TestSerialization:
+    def test_save_load_preserves_expanding_mode(self, tmp_path):
+        df = _make_price_df(100, 2)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        train_result = p.transform(df)
+
+        # Save and load
+        path = tmp_path / "processor.pkl"
+        p.save(str(path))
+        p2 = LogReturnProcessor.load(str(path))
+
+        assert p2.scaling == 'expanding'
+        assert p2.min_periods == 10
+        np.testing.assert_array_equal(p2.expanding_means_, p.expanding_means_)
+        np.testing.assert_array_equal(p2.expanding_stds_, p.expanding_stds_)
+
+        # Loaded processor should use global fallback for new data
+        test_df = _make_price_df(50, 2, seed=99)
+        result = p2.transform(test_df)
+        assert result.shape == (49, 2)
+
+
+class TestRoundTrip:
+    def test_global_exact_roundtrip(self):
+        df = _make_price_df(100, 2)
+        p = LogReturnProcessor(scaling='global')
+        p.fit(df)
+        scaled = p.transform(df)
+        initial = df.values[0]
+        prices = p.inverse_transform(scaled, initial)
+        # Should reconstruct original prices closely
+        np.testing.assert_allclose(prices[0, :, :], df.values[:], rtol=1e-10)
+
+    def test_expanding_approximate_roundtrip(self):
+        """Expanding round-trip is approximate; test shape and sanity."""
+        df = _make_price_df(300, 2)
+        p = LogReturnProcessor(scaling='expanding', min_periods=10)
+        p.fit(df)
+        scaled = p.transform(df)
+
+        # Use the final converged inverse transform
+        initial = df.values[0]
+        prices = p.inverse_transform(scaled, initial)
+
+        assert prices.shape[1] == scaled.shape[0] + 1  # seq + initial
+        assert not np.any(np.isnan(prices))
+        assert not np.any(np.isinf(prices))
+
+        # All reconstructed prices should be positive (log-return model invariant)
+        assert np.all(prices > 0)
+
+        # Prices should be in the same order of magnitude as the original
+        # (within 10x, not exact due to expanding stats differing from converged)
+        actual_last = df.values[-1]
+        reconstructed_last = prices[0, -1, :]
+        ratio = reconstructed_last / actual_last
+        assert np.all(ratio > 0.1) and np.all(ratio < 10.0)
