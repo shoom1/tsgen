@@ -2,7 +2,7 @@
 Data processing and loading utilities.
 
 This module provides composable pipeline functions for:
-- Loading data from findata.DataClient
+- Loading data from finbase.DataClient
 - Cleaning and preprocessing (NaN handling, scaling)
 - Creating sliding windows
 - Converting to PyTorch DataLoaders

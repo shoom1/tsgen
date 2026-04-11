@@ -393,7 +393,7 @@ class TestPipelineRegistry:
 
 @pytest.mark.integration
 class TestPipelineIntegration:
-    """Integration tests for full pipeline execution (requires findata database)."""
+    """Integration tests for full pipeline execution (requires finbase database)."""
 
     def test_minimal_pipeline_execution(self):
         """Test executing minimal real pipeline."""

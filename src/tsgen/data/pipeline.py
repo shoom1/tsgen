@@ -36,14 +36,14 @@ import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 
-# Import DataClient from findata project
+# Import DataClient from finbase project
 try:
-    from findata import DataClient
+    from finbase import DataClient
 except ImportError as e:
     raise ImportError(
-        f"Could not import findata.DataClient: {e}. "
-        "Please ensure findata is installed. "
-        "Run: cd ../findata && pip install -e ."
+        f"Could not import finbase.DataClient: {e}. "
+        "Please ensure finbase is installed. "
+        "Run: cd ../finbase && pip install -e ."
     )
 
 
@@ -57,7 +57,7 @@ def load_prices(tickers, start_date, end_date, column='adj_close', db_path=None)
         end_date: End date (YYYY-MM-DD)
         column: Price column to load (default: 'adj_close')
             Options: 'open', 'high', 'low', 'close', 'adj_close', 'volume'
-        db_path: Optional database path (auto-detects via ~/.findatarc if None)
+        db_path: Optional database path (auto-detects via ~/.finbaserc if None)
 
     Returns:
         pd.DataFrame: Wide format DataFrame with:
@@ -98,7 +98,7 @@ def load_prices(tickers, start_date, end_date, column='adj_close', db_path=None)
     if data.empty:
         raise ValueError(
             f"No data found for {tickers} between {start_date} and {end_date}. "
-            f"Please use the findata project to load data into the database."
+            f"Please use the finbase project to load data into the database."
         )
 
     print(f"Loaded {len(data)} rows for {len(data.columns)} symbols")
