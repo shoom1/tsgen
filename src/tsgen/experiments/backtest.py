@@ -23,14 +23,17 @@ from tsgen.config.schema import ExperimentConfig, DataConfig
 import tsgen.models
 
 
-DEFAULT_MODELS = ['gbm', 'bootstrap', 'unet', 'transformer']
+DEFAULT_MODELS = ['multivariate_gaussian', 'bootstrap', 'unet', 'transformer']
 MODEL_COLORS = {
-    'gbm': 'blue',
+    'multivariate_gaussian': 'blue',
     'bootstrap': 'green',
     'unet': 'orange',
     'transformer': 'purple',
     'mamba': 'red',
     'timevae': 'brown',
+    'diffwave': 'teal',
+    'dit': 'magenta',
+    'ccc_garch': 'olive',
 }
 
 

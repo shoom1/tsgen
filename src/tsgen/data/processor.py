@@ -49,8 +49,15 @@ class LogReturnProcessor(DataProcessor):
     - fit() fits the scaler only on valid (non-masked) values
     - transform() returns (data, mask) tuple where mask propagates NaN positions
     """
+    VALID_SCALING = ('global', 'expanding', 'none')
+
     def __init__(self, scaling='global', min_periods=60):
         super().__init__()
+        if scaling not in self.VALID_SCALING:
+            raise ValueError(
+                f"Unknown scaling mode: {scaling!r}. "
+                f"Valid options: {self.VALID_SCALING}"
+            )
         self.scaling = scaling
         self.min_periods = min_periods
         self.scaler = StandardScaler()
@@ -98,6 +105,9 @@ class LogReturnProcessor(DataProcessor):
 
             if self.scaling == 'expanding':
                 self._fit_expanding_masked(log_returns_array, mask_bool)
+            elif self.scaling == 'none':
+                self._set_identity_scaler(log_returns_array.shape[1],
+                                          n_samples_seen=mask_bool.sum(axis=0))
             else:
                 # Compute mean and std per feature using only valid values
                 means = []
@@ -125,8 +135,19 @@ class LogReturnProcessor(DataProcessor):
 
             if self.scaling == 'expanding':
                 self._fit_expanding(log_returns_array)
+            elif self.scaling == 'none':
+                self._set_identity_scaler(log_returns_array.shape[1],
+                                          n_samples_seen=log_returns_array.shape[0])
             else:
                 self.scaler.fit(log_returns_array)
+
+    def _set_identity_scaler(self, n_features, n_samples_seen):
+        """Configure scaler as identity (mean=0, scale=1) for scaling='none' mode."""
+        self.scaler.mean_ = np.zeros(n_features)
+        self.scaler.scale_ = np.ones(n_features)
+        self.scaler.var_ = np.ones(n_features)
+        self.scaler.n_features_in_ = n_features
+        self.scaler.n_samples_seen_ = n_samples_seen
 
     def _fit_expanding(self, log_returns):
         """Compute expanding-window mean and std for each timestep."""
@@ -233,6 +254,9 @@ class LogReturnProcessor(DataProcessor):
                 scaled_returns = scaled_returns * mask_array
                 self._fitted_expanding = False
                 return scaled_returns[self.min_periods:], mask_array[self.min_periods:]
+            elif self.scaling == 'none':
+                scaled_returns = log_returns_array * mask_array
+                return scaled_returns, mask_array
             else:
                 scaled_returns = self.scaler.transform(log_returns_array)
                 scaled_returns = scaled_returns * mask_array
@@ -246,6 +270,8 @@ class LogReturnProcessor(DataProcessor):
                 scaled_returns = (log_returns_array - self.expanding_means_) / self.expanding_stds_
                 self._fitted_expanding = False
                 return scaled_returns[self.min_periods:]
+            elif self.scaling == 'none':
+                return log_returns_array
             else:
                 return self.scaler.transform(log_returns_array)
 

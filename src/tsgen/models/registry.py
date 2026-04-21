@@ -49,8 +49,8 @@ class ModelRegistry:
             Decorator function that registers the model class
 
         Example:
-            @ModelRegistry.register('gbm', 'multivariate_lognormal')
-            class MultivariateGBM(StatisticalModel):
+            @ModelRegistry.register('multivariate_gaussian')
+            class MultivariateGaussian(StatisticalModel):
                 pass
         """
         def decorator(model_class: Type[BaseGenerativeModel]):

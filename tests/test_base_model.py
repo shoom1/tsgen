@@ -48,9 +48,9 @@ def test_base_generative_model_has_generate():
 
 def test_statistical_model_has_generate():
     """Test that StatisticalModel subclasses have generate()."""
-    from tsgen.models.baselines import MultivariateGBM
+    from tsgen.models.baselines import MultivariateGaussian
 
-    model = MultivariateGBM(features=2, full_covariance=False)
+    model = MultivariateGaussian(features=2, full_covariance=False)
     assert hasattr(model, 'generate')
     assert callable(model.generate)
 

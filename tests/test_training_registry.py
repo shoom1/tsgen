@@ -21,10 +21,9 @@ def test_registry_lists_all_trainers():
     assert 'unet' in trainers
     assert 'transformer' in trainers
     assert 'timevae' in trainers
-    assert 'gbm' in trainers
+    assert 'multivariate_gaussian' in trainers
     assert 'bootstrap' in trainers
-    assert 'multivariate_lognormal' in trainers
-    assert 'multivariate_gbm' in trainers
+    assert 'ccc_garch' in trainers
 
 
 def test_registry_get_diffusion_trainer():
@@ -59,15 +58,15 @@ def test_registry_get_vae_trainer():
 
 def test_registry_get_baseline_trainer():
     """Test getting baseline trainer from registry."""
-    from tsgen.models.baselines import MultivariateGBM
-    model = MultivariateGBM(features=2)
+    from tsgen.models.baselines import MultivariateGaussian
+    model = MultivariateGaussian(features=2)
     config = ExperimentConfig(
-        model_type='gbm',
+        model_type='multivariate_gaussian',
         training={'epochs': 1},
     )
     tracker = NoOpTracker()
 
-    trainer = TrainerRegistry.get_trainer('gbm', model, config, tracker, 'cpu')
+    trainer = TrainerRegistry.get_trainer('multivariate_gaussian', model, config, tracker, 'cpu')
     assert isinstance(trainer, BaselineTrainer)
 
 
@@ -89,11 +88,10 @@ def test_trainer_decorator_registers_multiple_types():
     assert trainers['unet'] == DiffusionTrainer
     assert trainers['transformer'] == DiffusionTrainer
 
-    # BaselineTrainer registered for all
-    assert trainers['gbm'] == BaselineTrainer
+    # BaselineTrainer registered for all baseline model types
+    assert trainers['multivariate_gaussian'] == BaselineTrainer
     assert trainers['bootstrap'] == BaselineTrainer
-    assert trainers['multivariate_lognormal'] == BaselineTrainer
-    assert trainers['multivariate_gbm'] == BaselineTrainer
+    assert trainers['ccc_garch'] == BaselineTrainer
 
 
 def test_trainer_has_common_interface():
@@ -102,8 +100,8 @@ def test_trainer_has_common_interface():
     diff_model = torch.nn.Linear(10, 10)
     from tsgen.models.timevae import TimeVAE
     vae_model = TimeVAE(features=2, sequence_length=32, latent_dim=8, hidden_dim=16)
-    from tsgen.models.baselines import MultivariateGBM
-    baseline_model = MultivariateGBM(features=2)
+    from tsgen.models.baselines import MultivariateGaussian
+    baseline_model = MultivariateGaussian(features=2)
 
     tracker = NoOpTracker()
     device = 'cpu'
@@ -120,13 +118,13 @@ def test_trainer_has_common_interface():
         training={'epochs': 1, 'learning_rate': 1e-3},
     )
     baseline_config = ExperimentConfig(
-        model_type='gbm',
+        model_type='multivariate_gaussian',
         training={'epochs': 1},
     )
 
     diff_trainer = TrainerRegistry.get_trainer('unet', diff_model, diff_config, tracker, device)
     vae_trainer = TrainerRegistry.get_trainer('timevae', vae_model, vae_config, tracker, device)
-    baseline_trainer = TrainerRegistry.get_trainer('gbm', baseline_model, baseline_config, tracker, device)
+    baseline_trainer = TrainerRegistry.get_trainer('multivariate_gaussian', baseline_model, baseline_config, tracker, device)
 
     # All should have train() method
     assert hasattr(diff_trainer, 'train')

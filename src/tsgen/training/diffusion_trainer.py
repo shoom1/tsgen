@@ -20,7 +20,7 @@ from tsgen.models.diffusion import DiffusionUtils
 from tsgen.analysis.metrics import calculate_stylized_facts
 
 
-@TrainerRegistry.register('unet', 'transformer', 'mamba')
+@TrainerRegistry.register('unet', 'transformer', 'mamba', 'diffwave', 'dit')
 class DiffusionTrainer(BaseTrainer):
     """
     Trainer for diffusion models (UNet, Transformer).

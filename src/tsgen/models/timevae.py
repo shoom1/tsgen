@@ -100,28 +100,22 @@ class TimeVAEEncoder(nn.Module):
 
 
 class TimeVAEDecoder(nn.Module):
-    """
-    Improved temporal decoder with autoregressive structure.
+    """Autoregressive LSTM decoder for TimeVAE.
 
-    Reconstructs sequences from latent representations using:
-    - Autoregressive generation (uses previous timesteps)
-    - Teacher forcing during training
-    - Latent conditioning at each timestep
-    - Batch normalization for stability
-    - Residual connections
+    Reconstructs sequences from a latent vector using:
+      - step-wise LSTM unrolling with teacher forcing at train time
+      - latent conditioning injected at every timestep
+      - LayerNorm on the LSTM output per step (position-invariant, unlike
+        BatchNorm which would pool running stats across timesteps within a
+        sequence — a correctness bug in the previous implementation)
+      - residual connection through the pre-output MLP
 
-    This addresses posterior collapse by making the decoder actually
-    use the latent information effectively.
+    The decoder is length-agnostic: its recurrence can unroll to any
+    positive length, requested via the ``length`` kwarg of ``forward``.
+    ``sequence_length`` is kept as a constructor arg only to provide a
+    sensible default for ``generate`` when no length is requested.
     """
     def __init__(self, latent_dim, hidden_dim, features, sequence_length, num_layers=2):
-        """
-        Args:
-            latent_dim: Dimension of latent space
-            hidden_dim: Hidden dimension for LSTM
-            features: Number of output features (tickers)
-            sequence_length: Length of output sequences
-            num_layers: Number of LSTM layers
-        """
         super().__init__()
         self.sequence_length = sequence_length
         self.hidden_dim = hidden_dim
@@ -145,73 +139,77 @@ class TimeVAEDecoder(nn.Module):
             dropout=0.1 if num_layers > 1 else 0.0
         )
 
-        # Batch normalization
-        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        # Per-step normalization. LayerNorm (not BatchNorm) because running
+        # stats should not pool across timesteps of a single sequence.
+        self.layer_norm = nn.LayerNorm(hidden_dim)
 
         # Output projection with residual
         self.pre_output = nn.Linear(hidden_dim, hidden_dim)
         self.output = nn.Linear(hidden_dim, features)
 
-    def forward(self, z, x=None, teacher_forcing_ratio=0.5):
-        """
-        Decode latent representation to sequence with autoregressive structure.
+    def forward(self, z, x=None, teacher_forcing_ratio=0.5, length=None):
+        """Decode a latent vector to a sequence.
 
         Args:
-            z: Latent tensor (Batch, latent_dim)
-            x: Ground truth for teacher forcing (Batch, Seq, Features) [optional]
-            teacher_forcing_ratio: Probability of using teacher forcing (training only)
+            z: (Batch, latent_dim)
+            x: Ground truth for teacher forcing (Batch, Seq, Features). When
+               provided, its sequence length controls how many steps to
+               unroll (ignoring ``length``).
+            teacher_forcing_ratio: Training-time probability of using ground
+               truth as the next input instead of the decoder's own prediction.
+            length: Desired output length. If None and ``x`` is None, falls
+               back to ``self.sequence_length``.
 
         Returns:
-            Reconstructed sequence (Batch, Seq, Features)
+            Reconstructed sequence (Batch, L, Features), where L is determined
+            by the arg precedence above.
         """
         batch_size = z.size(0)
         device = z.device
+
+        if x is not None:
+            L = x.size(1)
+        elif length is not None:
+            L = int(length)
+        else:
+            L = self.sequence_length
+
+        if L < 1:
+            raise ValueError(f"Decode length must be positive, got {L}")
 
         # Initialize hidden and cell states from latent
         h0 = self.latent_to_hidden(z).view(self.num_layers, batch_size, self.hidden_dim)
         c0 = self.latent_to_cell(z).view(self.num_layers, batch_size, self.hidden_dim)
 
-        # Project latent for conditioning at each timestep
-        z_projected = self.latent_projection(z)  # (Batch, hidden_dim)
-        z_seq = z_projected.unsqueeze(1).repeat(1, self.sequence_length, 1)  # (Batch, Seq, hidden_dim)
+        # Latent conditioning broadcast to every step (same at each t).
+        # Expand instead of repeat to avoid copying memory for each timestep.
+        z_projected = self.latent_projection(z)                       # (Batch, hidden_dim)
 
-        # Start with zeros
         decoder_input = torch.zeros(batch_size, self.features, device=device)
-
         outputs = []
         hidden = (h0, c0)
 
-        for t in range(self.sequence_length):
-            # Combine previous output with latent conditioning
-            # (Batch, features) + (Batch, hidden_dim) -> (Batch, features + hidden_dim)
-            combined_input = torch.cat([decoder_input, z_seq[:, t, :]], dim=-1)
-            combined_input = combined_input.unsqueeze(1)  # (Batch, 1, features + hidden_dim)
+        for t in range(L):
+            combined_input = torch.cat([decoder_input, z_projected], dim=-1).unsqueeze(1)
+            lstm_out, hidden = self.decoder(combined_input, hidden)   # (B, 1, hidden_dim)
+            lstm_out = lstm_out.squeeze(1)                            # (B, hidden_dim)
 
-            # LSTM step
-            lstm_out, hidden = self.decoder(combined_input, hidden)  # (Batch, 1, hidden_dim)
-            lstm_out = lstm_out.squeeze(1)  # (Batch, hidden_dim)
+            # LayerNorm is safe in both train and eval mode, at any batch size,
+            # and has no running stats to pollute across timesteps.
+            lstm_out = self.layer_norm(lstm_out)
 
-            # Batch norm (apply on hidden_dim dimension)
-            if self.training and batch_size > 1:
-                lstm_out = self.batch_norm(lstm_out)
-
-            # Residual connection through pre-output
-            pre_out = self.pre_output(lstm_out)
-            pre_out = F.relu(pre_out)
-            output_t = self.output(pre_out + lstm_out)  # Residual
+            pre_out = F.relu(self.pre_output(lstm_out))
+            output_t = self.output(pre_out + lstm_out)                # residual
 
             outputs.append(output_t)
 
-            # Teacher forcing: use ground truth or predicted output
+            # Teacher forcing: use ground truth or decoder prediction as next input
             if x is not None and self.training and torch.rand(1).item() < teacher_forcing_ratio:
-                decoder_input = x[:, t, :]  # Use ground truth
+                decoder_input = x[:, t, :]
             else:
-                decoder_input = output_t  # Use prediction
+                decoder_input = output_t
 
-        # Stack outputs
-        recon = torch.stack(outputs, dim=1)  # (Batch, Seq, Features)
-
-        return recon
+        return torch.stack(outputs, dim=1)                            # (B, L, Features)
 
 
 @ModelRegistry.register('timevae')
@@ -313,33 +311,26 @@ class TimeVAE(VAEModel):
         return recon, mu, logvar
 
     def generate(self, n_samples, seq_len=None, device='cpu', **kwargs):
-        """
-        Generate samples from prior distribution.
+        """Generate samples from the prior.
 
         Args:
-            n_samples: Number of samples to generate
-            seq_len: Length of sequences (uses self.sequence_length if None)
-            device: Device to generate on
-            **kwargs: Additional arguments (unused)
+            n_samples: Number of samples to generate.
+            seq_len: Desired sequence length. Defaults to ``self.sequence_length``.
+                The LSTM decoder can unroll to any positive length, so any
+                positive integer is accepted.
+            device: Device on which to return the result.
 
         Returns:
-            Generated sequences (n_samples, sequence_length, features)
+            torch.Tensor: Generated samples of shape (n_samples, seq_len, features).
         """
-        if seq_len is not None and seq_len != self.sequence_length:
-            raise ValueError(
-                f"TimeVAE decoder is fixed to sequence_length={self.sequence_length}. "
-                f"Cannot generate sequences of length {seq_len}."
-            )
+        L = int(seq_len) if seq_len is not None else self.sequence_length
+        if L < 1:
+            raise ValueError(f"seq_len must be positive, got {L}")
 
         model_device = next(self.parameters()).device
-
-        # Sample from prior N(0, I)
         z = torch.randn(n_samples, self.latent_dim, device=model_device)
-
-        # Decode
         with torch.no_grad():
-            samples = self.decoder(z)
-
+            samples = self.decoder(z, length=L)
         return samples.to(device)
 
     def encode(self, x):
@@ -355,14 +346,14 @@ class TimeVAE(VAEModel):
         mu, _ = self.encoder(x)
         return mu
 
-    def decode(self, z):
-        """
-        Decode latent representation to sequence.
+    def decode(self, z, length=None):
+        """Decode latent representation to a sequence of any requested length.
 
         Args:
-            z: Latent tensor (Batch, latent_dim)
+            z: Latent tensor (Batch, latent_dim).
+            length: Output sequence length. Defaults to ``self.sequence_length``.
 
         Returns:
-            Reconstructed sequence (Batch, Seq, Features)
+            Reconstructed sequence (Batch, length, Features).
         """
-        return self.decoder(z)
+        return self.decoder(z, length=length)

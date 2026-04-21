@@ -19,3 +19,4 @@ dependencies:
   - statsmodels>=0.13.0
   - pydantic>=2.0.0
   - joblib>=1.0.0
+  - arch>=6.0.0

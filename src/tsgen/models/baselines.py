@@ -4,35 +4,32 @@ from tsgen.models.base_model import StatisticalModel
 from tsgen.models.registry import ModelRegistry
 
 
-@ModelRegistry.register('gbm', 'multivariate_gbm', 'multivariate_lognormal')
-class MultivariateGBM(StatisticalModel):
-    """
-    Multivariate Geometric Brownian Motion baseline model.
+@ModelRegistry.register('multivariate_gaussian')
+class MultivariateGaussian(StatisticalModel):
+    """Multivariate Gaussian baseline on scaled log-returns.
 
-    This model generates synthetic time series using multivariate Gaussian sampling.
-    It supports two modes controlled by the `full_covariance` parameter:
+    Fits a Gaussian distribution to windowed log-returns (iid across time,
+    joint across assets). Captures first and second moments; misses every
+    stylized fact except the mean (no volatility clustering, no fat tails).
+    Useful as a floor benchmark for multi-asset risk scenarios.
 
-    - full_covariance=True (default): Captures cross-asset correlations via full
-      covariance matrix using Cholesky decomposition. Best for multi-asset scenarios
-      where correlations matter.
+    Named "Gaussian" rather than "GBM" because the model is a static
+    multivariate normal fit on z-scored returns — there is no drift term,
+    no compounding, nothing that makes it a geometric Brownian motion in
+    the continuous-time sense.
 
-    - full_covariance=False: Treats each feature independently with its own mean
-      and standard deviation. Faster but ignores correlations.
-
-    The model operates on scaled log-returns (z-scored data from DataProcessor).
-    It's a statistical fit (not gradient-based training), using 'fit' and 'sample'
-    lifecycle instead of the diffusion training loop.
+    Modes (via ``full_covariance``):
+      - True  (default): Fit mean vector + full covariance, sample with
+                         Cholesky factor. Captures cross-asset correlation.
+      - False          : Fit per-feature mean + std, sample independently.
+                         No cross-asset correlation; use only as an ablation.
     """
 
     @classmethod
     def from_config(cls, config, features=None):
-        """Create MultivariateGBM from ExperimentConfig."""
-        # Determine covariance mode based on model_type
-        if config.model_type == 'gbm':
-            full_covariance = False
-        else:
-            # 'multivariate_gbm', 'multivariate_lognormal' use full covariance
-            full_covariance = True
+        """Create MultivariateGaussian from ExperimentConfig."""
+        params = config.get_model_config()
+        full_covariance = getattr(params, 'full_covariance', True)
         return cls(features=features, full_covariance=full_covariance)
 
     def __init__(self, features, full_covariance=True):
@@ -148,7 +145,7 @@ class MultivariateGBM(StatisticalModel):
                     cov_regularized = torch.diag(diag.clamp(min=1e-6))
                     self.cholesky_L = torch.linalg.cholesky(cov_regularized)
 
-                print(f"MultivariateGBM Fitted with masks (full_covariance=True):")
+                print(f"MultivariateGaussian fitted with masks (full_covariance=True):")
                 print(f"  Mean: {self.mean}")
                 print(f"  Valid counts per feature: {valid_count}")
                 print(f"  Covariance diagonal: {torch.diagonal(cov)}")
@@ -164,7 +161,7 @@ class MultivariateGBM(StatisticalModel):
                 var = centered_sq.sum(dim=0) / (valid_count - 1).clamp(min=1)
                 self.sigma = torch.sqrt(var)
 
-                print(f"MultivariateGBM Fitted with masks (full_covariance=False):")
+                print(f"MultivariateGaussian fitted with masks (full_covariance=False):")
                 print(f"  mu={self.mu}")
                 print(f"  sigma={self.sigma}")
                 print(f"  Valid counts per feature: {valid_count}")
@@ -185,7 +182,7 @@ class MultivariateGBM(StatisticalModel):
                 # Cholesky decomposition: cov = L @ L.T
                 self.cholesky_L = torch.linalg.cholesky(cov_regularized)
 
-                print(f"MultivariateGBM Fitted (full_covariance=True):")
+                print(f"MultivariateGaussian fitted (full_covariance=True):")
                 print(f"  Mean: {self.mean}")
                 print(f"  Covariance diagonal: {torch.diagonal(cov)}")
                 print(f"  Correlation matrix:\n{self._cov_to_corr(cov)}")
@@ -194,7 +191,7 @@ class MultivariateGBM(StatisticalModel):
                 self.mu = torch.mean(X_flat, dim=0)
                 self.sigma = torch.std(X_flat, dim=0)
 
-                print(f"MultivariateGBM Fitted (full_covariance=False):")
+                print(f"MultivariateGaussian fitted (full_covariance=False):")
                 print(f"  mu={self.mu}")
                 print(f"  sigma={self.sigma}")
 
@@ -243,86 +240,156 @@ class MultivariateGBM(StatisticalModel):
 
 @ModelRegistry.register('bootstrap')
 class BootstrapGenerativeModel(StatisticalModel):
-    """
-    Historical Bootstrap (Block Bootstrap) Generative Model.
-    Resamples blocks from historical data.
+    """Stationary Block Bootstrap (Politis & Romano 1994).
+
+    Fits by reconstructing the chronological training series from windowed
+    batches; generates novel paths by concatenating random blocks of random
+    (geometrically distributed) length sampled with circular wrap-around.
+
+    This is the canonical bootstrap for stationary time series: within-block
+    temporal dependence is preserved (consecutive observations come from
+    consecutive training positions), while across blocks the process is
+    random, producing samples that are **not** copies of training windows.
+
+    Attributes:
+        block_p (float): Probability of ending the current block at each step.
+            Expected block length = 1 / block_p. Default 0.1 (avg block = 10).
     """
 
     @classmethod
     def from_config(cls, config, features=None):
         """Create BootstrapGenerativeModel from ExperimentConfig."""
         data = config.get_data_config()
-        return cls(features=features, sequence_length=data.sequence_length)
+        params = config.get_model_config()
+        block_p = getattr(params, 'block_p', 0.1)
+        return cls(
+            features=features,
+            sequence_length=data.sequence_length,
+            block_p=block_p,
+        )
 
-    def __init__(self, features, sequence_length):
+    def __init__(self, features, sequence_length, block_p: float = 0.1):
         super().__init__()
+        if not (0.0 < block_p <= 1.0):
+            raise ValueError(
+                f"block_p must be in (0, 1], got {block_p}. "
+                "Expected block length = 1 / block_p."
+            )
         self.features = features
         self.sequence_length = sequence_length
+        self.block_p = block_p
         self.dummy = torch.nn.Parameter(torch.zeros(1))
-        self.history = None  # Will store the pool of windows
+        # Flat chronological series (T, F); populated by fit()
+        self.history = None
 
     def fit(self, data_loader):
-        """
-        Stores the historical windows.
+        """Reconstruct the chronological training series from windowed batches.
 
-        Supports masked data: When batches contain (data, mask) tuples,
-        only fully valid windows (all positions are valid) are stored.
+        Assumes stride-1 windows in chronological order (shuffle=False). Since
+        consecutive windows overlap by L-1 positions, the full series is
+        windows[:, 0, :] concatenated with windows[-1, 1:, :].
 
-        Args:
-            data_loader: Yields batches of (Batch, Seq, Features) scaled log-returns,
-                        or (data, mask) tuples for masked training
+        Masked data: positions where *every* feature is masked are dropped
+        from the reconstructed series. Partially-masked positions are kept;
+        block resampling will carry their zero-filled values, which matches
+        how other models are trained on this data.
         """
-        valid_windows = []
-        total_windows = 0
+        all_windows = []
+        all_masks = []
         has_masks = False
 
         for batch in data_loader:
-            # Handle both tuple (from TensorDataset) and raw tensor batches
             if isinstance(batch, (list, tuple)):
-                data = batch[0]
+                all_windows.append(batch[0])
                 if len(batch) > 1:
-                    mask = batch[1]
+                    all_masks.append(batch[1])
                     has_masks = True
-
-                    # Keep only fully valid windows: all positions are 1
-                    # Sum across seq and features: if sum equals total elements, window is fully valid
-                    total_elements = mask.shape[1] * mask.shape[2]
-                    fully_valid = (mask.sum(dim=(1, 2)) == total_elements)
-                    data = data[fully_valid]
             else:
-                data = batch
+                all_windows.append(batch)
 
-            total_windows += len(batch[0]) if isinstance(batch, (list, tuple)) else len(batch)
-            if len(data) > 0:
-                valid_windows.append(data)
+        if not all_windows:
+            raise ValueError("Empty dataloader.")
 
-        if valid_windows:
-            self.history = torch.cat(valid_windows, dim=0)
-            if has_masks:
-                print(f"Bootstrap Fitted with masks: {len(self.history)} fully valid windows "
-                      f"(from {total_windows} total)")
-            else:
-                print(f"Bootstrap Fitted: History pool size {self.history.shape}")
-        else:
-            raise ValueError("No fully valid windows found in training data. "
-                           "Consider using a different model or adjusting data cleaning strategy.")
+        windows = torch.cat(all_windows, dim=0)  # (N, L, F)
+        if windows.ndim != 3:
+            raise ValueError(
+                f"Expected (N, L, F) windows from dataloader, got shape {windows.shape}."
+            )
 
-    def generate(self, n_samples, seq_len=None, device='cpu', **kwargs):
-        """
-        Generate samples by resampling from historical windows.
+        first_col = windows[:, 0, :]                     # (N, F)
+        tail = windows[-1, 1:, :]                        # (L-1, F)
+        series = torch.cat([first_col, tail], dim=0)     # (N + L - 1, F) = (T, F)
 
-        Args:
-            n_samples: Number of samples to generate
-            seq_len: Not used (fixed by stored history), kept for API compatibility
-            device: Device to generate on
-            **kwargs: Additional arguments (unused)
+        if has_masks:
+            masks = torch.cat(all_masks, dim=0)          # (N, L, F)
+            mask_first = masks[:, 0, :]                  # (N, F)
+            mask_tail = masks[-1, 1:, :]                 # (L-1, F)
+            mask_series = torch.cat([mask_first, mask_tail], dim=0)  # (T, F)
+            # Drop positions where every feature is masked
+            any_valid = mask_series.sum(dim=-1) > 0      # (T,)
+            series = series[any_valid]
 
-        Returns:
-            Tensor of shape (n_samples, sequence_length, features)
+        if series.shape[0] < 2:
+            raise ValueError(
+                f"Reconstructed training series is too short ({series.shape[0]} steps). "
+                "Bootstrap needs at least 2 observations."
+            )
+
+        self.history = series
+        print(
+            f"Bootstrap fitted (stationary block): T={series.shape[0]}, "
+            f"F={series.shape[1]}, block_p={self.block_p:.3f} "
+            f"(expected block length = {1.0 / self.block_p:.1f})"
+        )
+
+    def generate(self, n_samples, seq_len, device='cpu', **kwargs):
+        """Generate n_samples novel trajectories of length seq_len.
+
+        Algorithm (fully vectorized):
+          1. Decide for each (sample, timestep) whether to start a new block,
+             with per-step probability ``block_p``. Force the first timestep
+             to start a block.
+          2. For each potential block-start position, draw a random starting
+             index into the training series (uniform over ``[0, T)``).
+          3. For each output position t, find the most recent block-start
+             (via cummax of the jump-time indicator) and compute the offset
+             within that block.
+          4. Source index = (base_index_at_block_start + offset) mod T —
+             circular wrap handles blocks that run past the end of the series.
+          5. Gather from ``self.history``.
         """
         if self.history is None:
             raise ValueError("Model not fitted.")
+        if seq_len < 1:
+            raise ValueError(f"seq_len must be positive, got {seq_len}")
 
-        # Randomly sample indices
-        indices = torch.randint(0, len(self.history), (n_samples,))
-        return self.history[indices].to(device)
+        T = self.history.shape[0]
+        F = self.features
+        N = n_samples
+        L = seq_len
+
+        # (N, L) True where a new block starts at this step. First step always True.
+        jumps = torch.rand(N, L) < self.block_p
+        jumps[:, 0] = True
+
+        # Per-(sample, step) random destination. Only meaningful where jumps=True,
+        # but generating everywhere is cheaper than conditional sampling.
+        new_indices = torch.randint(0, T, (N, L))
+
+        # For each step t, find t' = most recent jump time at or before t.
+        # trick: mark jump times with their index, zero elsewhere, then cummax.
+        arange_row = torch.arange(L).unsqueeze(0).expand(N, L)
+        marked = torch.where(jumps, arange_row, torch.zeros_like(arange_row))
+        block_start_t, _ = torch.cummax(marked, dim=1)           # (N, L)
+
+        # Base index for each (sample, step): new_indices at the block start.
+        base_idx = torch.gather(new_indices, dim=1, index=block_start_t)
+
+        # Position within current block.
+        offset = arange_row - block_start_t                      # (N, L)
+
+        # Source indices into the training series, with circular wrap.
+        src = (base_idx + offset) % T                            # (N, L)
+
+        out = self.history[src]                                  # (N, L, F)
+        return out.to(device)

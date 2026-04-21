@@ -43,6 +43,7 @@ dependencies = [
     "tqdm>=4.0.0",
     "joblib>=1.0.0",
     "pydantic>=2.0.0",
+    "arch>=6.0.0",
     # Note: finbase dependency must be installed separately
     # cd ../finbase && pip install -e .
 ]

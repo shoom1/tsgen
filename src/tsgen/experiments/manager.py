@@ -325,10 +325,14 @@ _Add any observations, issues, or insights here during the experiment._
             # Add model-specific parameters
             model_params = {
                 'timevae': ['hidden_dim', 'latent_dim', 'encoder_type', 'vae_beta', 'vae_use_annealing'],
-                'multivariate_lognormal': [],
-                'gbm': [],
+                'multivariate_gaussian': ['full_covariance'],
+                'bootstrap': [],
+                'ccc_garch': ['p', 'q', 'distribution'],
                 'unet': ['hidden_channels', 'timesteps'],
-                'transformer': ['d_model', 'nhead', 'num_layers', 'timesteps']
+                'transformer': ['d_model', 'nhead', 'num_layers', 'timesteps'],
+                'dit': ['dim', 'depth', 'heads', 'mlp_ratio', 'timesteps'],
+                'diffwave': ['residual_channels', 'num_blocks', 'dilation_cycle_length', 'timesteps'],
+                'mamba': ['dim', 'depth', 'd_state', 'timesteps'],
             }
 
             params_to_show = model_params.get(model_type, [])

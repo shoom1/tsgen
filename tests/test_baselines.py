@@ -1,5 +1,5 @@
 """
-Tests for baseline generative models (MultivariateGBM and Bootstrap).
+Tests for baseline generative models (MultivariateGaussian and Bootstrap).
 
 These models don't use neural networks but provide important baselines
 for comparison with diffusion models.
@@ -8,7 +8,7 @@ for comparison with diffusion models.
 import pytest
 import torch
 import numpy as np
-from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
+from tsgen.models.baselines import MultivariateGaussian, BootstrapGenerativeModel
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
@@ -32,22 +32,22 @@ def synthetic_dataloader():
 
 
 def test_multivariate_gbm_initialization():
-    """Test MultivariateGBM model can be initialized."""
+    """Test MultivariateGaussian model can be initialized."""
     # Test with full covariance (default)
-    model_full = MultivariateGBM(features=2)
+    model_full = MultivariateGaussian(features=2)
     assert model_full is not None
     assert model_full.features == 2
     assert model_full.full_covariance == True
 
     # Test without covariance (independent sampling)
-    model_indep = MultivariateGBM(features=2, full_covariance=False)
+    model_indep = MultivariateGaussian(features=2, full_covariance=False)
     assert model_indep.features == 2
     assert model_indep.full_covariance == False
 
 
 def test_multivariate_gbm_fit_independent(synthetic_dataloader):
-    """Test MultivariateGBM model fitting (independent mode)."""
-    model = MultivariateGBM(features=2, full_covariance=False)
+    """Test MultivariateGaussian model fitting (independent mode)."""
+    model = MultivariateGaussian(features=2, full_covariance=False)
 
     # Fit model
     model.fit(synthetic_dataloader)
@@ -65,8 +65,8 @@ def test_multivariate_gbm_fit_independent(synthetic_dataloader):
 
 
 def test_multivariate_gbm_sample_independent(synthetic_dataloader):
-    """Test MultivariateGBM model sampling (independent mode)."""
-    model = MultivariateGBM(features=2, full_covariance=False)
+    """Test MultivariateGaussian model sampling (independent mode)."""
+    model = MultivariateGaussian(features=2, full_covariance=False)
     model.fit(synthetic_dataloader)
 
     # Generate samples
@@ -82,8 +82,8 @@ def test_multivariate_gbm_sample_independent(synthetic_dataloader):
 
 
 def test_multivariate_gbm_reproducibility_independent():
-    """Test MultivariateGBM sampling is reproducible with same seed (independent mode)."""
-    model = MultivariateGBM(features=2, full_covariance=False)
+    """Test MultivariateGaussian sampling is reproducible with same seed (independent mode)."""
+    model = MultivariateGaussian(features=2, full_covariance=False)
 
     # Set parameters manually
     model.mu = torch.tensor([0.001, 0.002])
@@ -100,91 +100,150 @@ def test_multivariate_gbm_reproducibility_independent():
     assert torch.allclose(samples1, samples2)
 
 
+def _make_ordered_loader(series: np.ndarray, window_len: int = 32, batch_size: int = 16):
+    """Build a stride-1, shuffle=False dataloader of overlapping windows.
+
+    Mirrors what the training pipeline produces for order-dependent baselines.
+    """
+    from torch.utils.data import DataLoader, TensorDataset
+    T, F = series.shape
+    n = T - window_len + 1
+    windows = np.empty((n, window_len, F), dtype=np.float32)
+    for i in range(n):
+        windows[i] = series[i:i + window_len]
+    ds = TensorDataset(torch.from_numpy(windows))
+    return DataLoader(ds, batch_size=batch_size, shuffle=False)
+
+
 def test_bootstrap_initialization():
-    """Test Bootstrap model can be initialized."""
-    model = BootstrapGenerativeModel(features=2, sequence_length=64)
-    assert model is not None
+    """Model constructs with expected attributes and accepts block_p."""
+    model = BootstrapGenerativeModel(features=2, sequence_length=64, block_p=0.1)
     assert model.features == 2
     assert model.sequence_length == 64
+    assert model.block_p == 0.1
+    assert model.history is None  # set by fit()
 
 
-def test_bootstrap_fit(synthetic_dataloader):
-    """Test Bootstrap model fitting."""
-    model = BootstrapGenerativeModel(features=2, sequence_length=64)
-
-    # Fit model (stores historical windows)
-    model.fit(synthetic_dataloader)
-
-    # Verify history was stored
-    assert model.history is not None
-    assert len(model.history) > 0
-
-    # Verify history shape (num_windows, seq_len, features)
-    assert model.history.shape[1] == 64  # seq_len
-    assert model.history.shape[2] == 2   # features
+def test_bootstrap_rejects_invalid_block_p():
+    with pytest.raises(ValueError):
+        BootstrapGenerativeModel(features=2, sequence_length=64, block_p=0.0)
+    with pytest.raises(ValueError):
+        BootstrapGenerativeModel(features=2, sequence_length=64, block_p=1.5)
 
 
-def test_bootstrap_sample(synthetic_dataloader):
-    """Test Bootstrap model sampling."""
-    model = BootstrapGenerativeModel(features=2, sequence_length=64)
-    model.fit(synthetic_dataloader)
+def test_bootstrap_fit_stores_flat_series():
+    """Fit reconstructs the chronological series from windowed batches."""
+    rng = np.random.default_rng(0)
+    series = rng.normal(size=(500, 3)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=32)
 
-    # Generate samples
-    num_samples = 10
-    seq_len = 64
-    samples = model.generate(num_samples, seq_len)
+    model = BootstrapGenerativeModel(features=3, sequence_length=32)
+    model.fit(loader)
 
-    # Verify sample shape
-    assert samples.shape == (num_samples, seq_len, 2)
-
-    # Verify samples are finite
-    assert torch.all(torch.isfinite(samples))
+    # History is the flat (T, F) series, not windowed
+    assert model.history.ndim == 2
+    assert model.history.shape == (500, 3)
+    np.testing.assert_allclose(model.history.numpy(), series, atol=1e-6)
 
 
-def test_bootstrap_sampling_from_history():
-    """Test that bootstrap samples from history."""
-    model = BootstrapGenerativeModel(features=1, sequence_length=32)
+def test_bootstrap_respects_requested_seq_len():
+    """Unlike the old window-resampler, generate() honors seq_len exactly."""
+    rng = np.random.default_rng(1)
+    series = rng.normal(size=(400, 2)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=32)
 
-    # Create simple historical data
-    # Store 4 different windows
-    history = []
-    for i in range(4):
-        window = torch.arange(32).float().reshape(1, 32, 1) + i * 10  # Different patterns
-        history.append(window)
+    model = BootstrapGenerativeModel(features=2, sequence_length=32)
+    model.fit(loader)
 
-    model.history = torch.cat(history, dim=0)
+    for requested_len in [17, 64, 100, 250]:
+        out = model.generate(n_samples=4, seq_len=requested_len)
+        assert out.shape == (4, requested_len, 2)
+        assert torch.isfinite(out).all()
 
-    # Generate sample
-    torch.manual_seed(42)
-    sample = model.generate(1, 32)
 
-    # Verify sample is valid
-    assert sample.shape == (1, 32, 1)
-    assert torch.all(torch.isfinite(sample))
+def test_bootstrap_produces_novel_paths():
+    """Generated windows must differ from any training window
+    (the old window-resampler failed this — it returned exact copies)."""
+    rng = np.random.default_rng(2)
+    series = rng.normal(size=(500, 1)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=32)
+
+    model = BootstrapGenerativeModel(features=1, sequence_length=32, block_p=0.3)
+    model.fit(loader)
+
+    # Collect all training windows
+    all_train_windows = set()
+    for i in range(len(series) - 32 + 1):
+        all_train_windows.add(tuple(series[i:i + 32, 0].tolist()))
+
+    # Generate many samples and check at least one is novel
+    torch.manual_seed(99)
+    generated = model.generate(n_samples=50, seq_len=32).numpy()
+    novel_count = sum(
+        1 for g in generated
+        if tuple(g[:, 0].tolist()) not in all_train_windows
+    )
+    # With block_p=0.3 (avg block length ~3), 32-step sequences will cross
+    # multiple block boundaries and almost certainly be novel.
+    assert novel_count >= 40, f"Only {novel_count}/50 samples were novel"
+
+
+def test_bootstrap_block_p_one_is_iid_per_step():
+    """block_p=1 means every step starts a new block — equivalent to iid
+    resampling of single elements (no temporal structure preserved)."""
+    rng = np.random.default_rng(3)
+    series = rng.normal(size=(200, 1)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=32)
+
+    model = BootstrapGenerativeModel(features=1, sequence_length=32, block_p=1.0)
+    model.fit(loader)
+
+    torch.manual_seed(0)
+    out = model.generate(n_samples=200, seq_len=50).numpy().reshape(-1)
+    # Mean should approximate the empirical mean of the series
+    np.testing.assert_allclose(out.mean(), series.mean(), atol=0.15)
+    np.testing.assert_allclose(out.std(), series.std(), atol=0.15)
+
+
+def test_bootstrap_preserves_marginal_statistics():
+    """On a long enough sample, generated returns should have mean/std
+    close to those of the training series."""
+    rng = np.random.default_rng(4)
+    series = rng.normal(loc=0.01, scale=0.02, size=(2000, 3)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=64)
+
+    model = BootstrapGenerativeModel(features=3, sequence_length=64, block_p=0.1)
+    model.fit(loader)
+
+    torch.manual_seed(1)
+    out = model.generate(n_samples=200, seq_len=200).numpy()
+    flat = out.reshape(-1, 3)
+    np.testing.assert_allclose(flat.mean(axis=0), series.mean(axis=0), atol=0.005)
+    np.testing.assert_allclose(flat.std(axis=0), series.std(axis=0), atol=0.003)
 
 
 def test_bootstrap_reproducibility():
-    """Test Bootstrap sampling is reproducible with same seed."""
-    model = BootstrapGenerativeModel(features=2, sequence_length=64)
+    """Sampling is reproducible under the same seed."""
+    rng = np.random.default_rng(5)
+    series = rng.normal(size=(300, 2)).astype(np.float32)
+    loader = _make_ordered_loader(series, window_len=32)
 
-    # Set history manually
-    model.history = torch.randn(10, 64, 2)
+    model = BootstrapGenerativeModel(features=2, sequence_length=32)
+    model.fit(loader)
 
-    # Generate samples with same seed
     torch.manual_seed(42)
     samples1 = model.generate(5, 64)
 
     torch.manual_seed(42)
     samples2 = model.generate(5, 64)
 
-    # Verify samples are identical
     assert torch.allclose(samples1, samples2)
 
 
 def test_multivariate_gbm_vs_bootstrap_different_outputs(synthetic_dataloader):
-    """Test that MultivariateGBM and Bootstrap produce different samples."""
+    """Test that MultivariateGaussian and Bootstrap produce different samples."""
     # Create and fit both models
-    gbm = MultivariateGBM(features=2, full_covariance=False)
+    gbm = MultivariateGaussian(features=2, full_covariance=False)
     gbm.fit(synthetic_dataloader)
 
     bootstrap = BootstrapGenerativeModel(features=2, sequence_length=64)
@@ -206,8 +265,8 @@ def test_baseline_models_save_load():
     import tempfile
     import os
 
-    # Create MultivariateGBM model (independent mode)
-    gbm = MultivariateGBM(features=2, full_covariance=False)
+    # Create MultivariateGaussian model (independent mode)
+    gbm = MultivariateGaussian(features=2, full_covariance=False)
     gbm.mu = torch.tensor([0.001, 0.002])
     gbm.sigma = torch.tensor([0.02, 0.03])
 

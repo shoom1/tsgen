@@ -19,7 +19,7 @@ class DataConfig(BaseModel):
     column: str = 'adj_close'
     db_path: Optional[str] = None
     train_test_split: Optional[float] = None
-    scaling: Literal['global', 'expanding'] = 'global'
+    scaling: Literal['global', 'expanding', 'none'] = 'global'
     min_periods: int = 60
 
     @field_validator('sequence_length')
@@ -133,6 +133,31 @@ class TransformerModelConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class DiTModelConfig(BaseModel):
+    """DiT1D (adaLN-Zero Diffusion Transformer) architecture parameters."""
+
+    dim: int = 128
+    depth: int = 4
+    heads: int = 4
+    mlp_ratio: float = 4.0
+    dropout: float = 0.0
+    num_classes: int = 0
+
+    model_config = ConfigDict(extra='forbid')
+
+
+class DiffWaveModelConfig(BaseModel):
+    """DiffWave model architecture parameters."""
+
+    residual_channels: int = 64
+    num_blocks: int = 10
+    dilation_cycle_length: int = 5
+    kernel_size: int = 3
+    num_classes: int = 0
+
+    model_config = ConfigDict(extra='forbid')
+
+
 class MambaModelConfig(BaseModel):
     """Mamba model architecture parameters."""
 
@@ -163,6 +188,36 @@ class BaselineModelConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class MultivariateGaussianConfig(BaseModel):
+    """MultivariateGaussian baseline parameters."""
+
+    full_covariance: bool = True
+
+    model_config = ConfigDict(extra='forbid')
+
+
+class BootstrapModelConfig(BaseModel):
+    """Stationary block bootstrap parameters.
+
+    block_p: probability that each step ends the current block.
+        Expected block length = 1 / block_p. Default 0.1 (avg block = 10 steps).
+    """
+
+    block_p: float = 0.1
+
+    model_config = ConfigDict(extra='forbid')
+
+
+class GARCHModelConfig(BaseModel):
+    """CCC-GARCH model parameters."""
+
+    p: int = 1
+    q: int = 1
+    distribution: Literal['normal', 't'] = 't'
+
+    model_config = ConfigDict(extra='forbid')
+
+
 # ---------------------------------------------------------------------------
 # Mapping dicts: model_type -> config class
 # ---------------------------------------------------------------------------
@@ -171,22 +226,24 @@ MODEL_CONFIG_MAP: Dict[str, type] = {
     'unet': UNetModelConfig,
     'transformer': TransformerModelConfig,
     'mamba': MambaModelConfig,
+    'diffwave': DiffWaveModelConfig,
+    'dit': DiTModelConfig,
     'timevae': VAEModelConfig,
-    'gbm': BaselineModelConfig,
-    'bootstrap': BaselineModelConfig,
-    'multivariate_gbm': BaselineModelConfig,
-    'multivariate_lognormal': BaselineModelConfig,
+    'multivariate_gaussian': MultivariateGaussianConfig,
+    'bootstrap': BootstrapModelConfig,
+    'ccc_garch': GARCHModelConfig,
 }
 
 TRAINING_CONFIG_MAP: Dict[str, type] = {
     'unet': DiffusionTrainingConfig,
     'transformer': DiffusionTrainingConfig,
     'mamba': DiffusionTrainingConfig,
+    'diffwave': DiffusionTrainingConfig,
+    'dit': DiffusionTrainingConfig,
     'timevae': VAETrainingConfig,
-    'gbm': BaselineTrainingConfig,
+    'multivariate_gaussian': BaselineTrainingConfig,
     'bootstrap': BaselineTrainingConfig,
-    'multivariate_gbm': BaselineTrainingConfig,
-    'multivariate_lognormal': BaselineTrainingConfig,
+    'ccc_garch': BaselineTrainingConfig,
 }
 
 

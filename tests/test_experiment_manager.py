@@ -242,11 +242,11 @@ class TestAddModelConfig:
         exp_path = manager.create_experiment('comparison', config=None)
 
         # Add three different models
-        manager.add_model_config(exp_path, 'gbm', sample_config)
+        manager.add_model_config(exp_path, 'multivariate_gaussian', sample_config)
         manager.add_model_config(exp_path, 'unet', sample_config)
         manager.add_model_config(exp_path, 'transformer', sample_config)
 
-        assert (exp_path / 'config_gbm.yaml').exists()
+        assert (exp_path / 'config_multivariate_gaussian.yaml').exists()
         assert (exp_path / 'config_unet.yaml').exists()
         assert (exp_path / 'config_transformer.yaml').exists()
 

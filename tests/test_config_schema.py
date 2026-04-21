@@ -183,7 +183,7 @@ class TestExperimentConfig:
         assert tc.beta == 0.3
 
     def test_get_training_config_baseline(self):
-        c = ExperimentConfig(model_type='gbm')
+        c = ExperimentConfig(model_type='multivariate_gaussian')
         tc = c.get_training_config()
         assert isinstance(tc, BaselineTrainingConfig)
 

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **CCC-GARCH(1,1) baseline** (`tsgen.models.garch.CCCGARCH`, registered as `ccc_garch`). Univariate GARCH(1,1) per ticker with Normal or Student-t innovations, plus a constant conditional correlation matrix `R` estimated from standardized residuals. Captures volatility clustering and fat tails — the two stylized facts the existing Gaussian baseline misses. Depends on `arch>=6.0.0`. See `experiments/0007_ccc_garch/` and `notes/2026-04-16-ccc-garch-design.md`.
+- **`LogReturnProcessor(scaling='none')`** — produces raw log-returns without `StandardScaler` z-scoring. Required by GARCH (which models conditional variance directly) and available for any future model that needs returns in natural units. Identity-scaler means existing `inverse_transform` still works unchanged.
+- **DiffWave-style dilated-conv diffusion** (`tsgen.models.diffwave.DiffWave1D`, registered as `diffwave`). Stack of gated dilated residual blocks with cycled dilations; no pooling or downsampling so temporal resolution is preserved end-to-end — important for log-return generation because volatility clustering lives at the highest frequencies. Unlike UNet1D, accepts any positive sequence length. See `experiments/0008_diffwave/`. `UNet1D` is retained for direct pooling-vs-dilation ablation.
+- **DiT1D** (`tsgen.models.dit.DiT1D`, registered as `dit`). DiT-style Diffusion Transformer with **adaLN-Zero** conditioning (per-block shift/scale/gate for both attention and MLP sublayers, modulation MLPs zero-initialized so blocks start as identity) and **sinusoidal positional encoding** (computed per-call, so the same checkpoint can sample any sequence length). Final projection zero-initialized for training-stability (starts predicting zero noise). Supports class conditioning and masking. See `experiments/0009_dit/`. `DiffusionTransformer` retained for the conditioning-scheme ablation (additive vs adaLN-Zero, Peebles & Xie 2023).
+
+### Changed - Breaking
+
+- **`BootstrapGenerativeModel` is now a proper stationary block bootstrap** (Politis & Romano 1994), replacing the old "random window resampler" that was mislabeled as a block bootstrap. Contract changes: (1) `fit` now reconstructs the chronological series from the windowed dataloader and requires `shuffle=False`; (2) `generate(n_samples, seq_len)` honors `seq_len` exactly (previously it was ignored and the fixed training window length was always returned); (3) generated paths concatenate blocks of geometrically-distributed length with circular wrap, producing novel samples rather than exact copies of training windows. New config knob: `block_p` (default 0.1, meaning expected block length of 10 steps) in `BootstrapModelConfig`. The generation algorithm is fully vectorized via `cummax` + `gather` — no Python loop over sequence positions.
+- **Renamed `MultivariateGBM` → `MultivariateGaussian`**, and collapsed the three registry aliases (`gbm`, `multivariate_gbm`, `multivariate_lognormal`) to a single canonical name `multivariate_gaussian`. The previous naming was misleading: the model is a static multivariate normal fit on scaled log-returns — no drift, no compounding, nothing that makes it a geometric Brownian motion. The `full_covariance` toggle (default `True`) now lives in a dedicated `MultivariateGaussianConfig` and is read from the YAML `model:` section. Migration: any config using `model_type: 'gbm' | 'multivariate_gbm' | 'multivariate_lognormal'` must be updated to `model_type: 'multivariate_gaussian'`; diagonal-covariance users add `model: { full_covariance: false }`. Existing experiment `0005_multivariate_lognormal/config.yaml` has been migrated in-place.
+
+### Fixed
+
+- **TimeVAE decoder: `BatchNorm1d` → `LayerNorm`.** The old decoder applied `BatchNorm1d` inside the autoregressive unroll, which pooled running statistics across timesteps within a sequence — a correctness bug, since each timestep is a distinct position in the series. LayerNorm is position-invariant, has no running stats, and works correctly at batch size 1 in both train and eval modes.
+- **TimeVAE: variable-length generation.** `TimeVAE.generate(seq_len=X)` and `TimeVAE.decode(z, length=X)` now honor any positive `X`. The LSTM decoder is inherently length-agnostic; the old `ValueError` on mismatched length was an artificial constraint. `TimeVAEDecoder.forward` gained an explicit `length` kwarg. The training path (with teacher forcing) uses the input's sequence length and so reconstruction length still matches input length.
+
+### Changed
+
+- **`MambaDiffusion` selective scan** — replaced the per-timestep Python loop with a chunked Heinsen parallel scan (`MambaBlock._ssm_parallel`). The scalar Heinsen identity `h_t = cumprod_t * cumsum_t(b_s / cumprod_s)` applies element-wise over every `(batch, d_inner, d_state)` triple since Mamba's `A` is diagonal in state dim. Result: vectorized across sequence length via `torch.cumprod` + `torch.cumsum` instead of looping over `L`. Chunk size bounds cumulative products within float32 range. The original sequential loop is retained as `_ssm_sequential` for correctness validation (new tests in `tests/test_mamba_parallel_scan.py` assert equivalence within float32 tolerance) and as a reference implementation. Speedup is ~1.5–2× on CPU for typical training shapes (B≤8); on GPU the parallel path dominates by a much larger margin.
+
 ## [0.4.0] - 2026-03-24
 
 ### Changed - Breaking

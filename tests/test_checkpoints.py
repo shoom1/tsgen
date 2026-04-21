@@ -19,7 +19,7 @@ from tsgen.models.registry import ModelRegistry
 from tsgen.config.schema import ExperimentConfig
 from tsgen.models.unet import UNet1D
 from tsgen.models.transformer import DiffusionTransformer
-from tsgen.models.baselines import MultivariateGBM, BootstrapGenerativeModel
+from tsgen.models.baselines import MultivariateGaussian, BootstrapGenerativeModel
 from tsgen.data.processor import LogReturnProcessor
 import pandas as pd
 import numpy as np
@@ -204,7 +204,7 @@ def test_checkpoint_directory_structure(temp_dir):
 def test_gbm_baseline_save_load(temp_dir):
     """Test GBM baseline model save/load."""
     # Create GBM model (independent mode)
-    model = MultivariateGBM(features=2, full_covariance=False)
+    model = MultivariateGaussian(features=2, full_covariance=False)
     model.mu = torch.tensor([0.001, 0.002])
     model.sigma = torch.tensor([0.02, 0.03])
 
