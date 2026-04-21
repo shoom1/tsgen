@@ -74,13 +74,20 @@ def calculate_stylized_facts(real_returns, synthetic_returns):
         dict: Dictionary containing metrics and comparison scores.
     """
     # Flatten dimensions for distribution statistics: (N * Seq_Len, Features)
-    # We treat all windows as a continuous stream for distribution analysis, 
+    # We treat all windows as a continuous stream for distribution analysis,
     # though breaks exist.
     real_flat = real_returns.reshape(-1, real_returns.shape[-1])
     syn_flat = synthetic_returns.reshape(-1, synthetic_returns.shape[-1])
-    
+
+    # Stylized-fact statistics (kurtosis, skew, ACF) require finite input.
+    # scipy's `kurtosis`/`skew` default `nan_policy='propagate'`, so a single
+    # NaN in a column yields NaN for that column's stat. Sanitize to zero —
+    # the most honest fallback is to exclude those positions from the stat.
+    real_flat = np.nan_to_num(real_flat, nan=0.0, posinf=0.0, neginf=0.0)
+    syn_flat = np.nan_to_num(syn_flat, nan=0.0, posinf=0.0, neginf=0.0)
+
     metrics = {}
-    
+
     # 1. Distributional Statistics (per asset)
     metrics['real_kurtosis'] = kurtosis(real_flat, axis=0)
     metrics['syn_kurtosis'] = kurtosis(syn_flat, axis=0)
@@ -172,6 +179,28 @@ def calculate_stylized_facts(real_returns, synthetic_returns):
     
     return metrics
 
+def _sanitize_correlation_matrix(corr: np.ndarray) -> np.ndarray:
+    """Clean a (possibly degenerate) correlation matrix for downstream linalg.
+
+    Handles the cases exposed by real evaluation runs:
+      - NaN in synthetic samples (``corrcoef`` returns NaN rows/cols)
+      - Constant-valued feature columns (zero variance → NaN correlations)
+      - Inf values from diverged models
+      - Slight asymmetry from floating-point noise
+
+    Returns a symmetric matrix with unit diagonal and all finite entries.
+    No raise path: if every intermediate is NaN, returns the identity.
+    """
+    if np.isscalar(corr):
+        return np.array([[1.0]])
+    corr = np.asarray(corr, dtype=float)
+    corr = np.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0)
+    # Force symmetric and unit-diagonal so eigvalsh behaves.
+    corr = 0.5 * (corr + corr.T)
+    np.fill_diagonal(corr, 1.0)
+    return corr
+
+
 def compute_correlation_structure_metrics(real_returns, synthetic_returns):
     """
     Comprehensive correlation structure analysis.
@@ -193,8 +222,14 @@ def compute_correlation_structure_metrics(real_returns, synthetic_returns):
     metrics = {}
 
     # 1. Correlation Matrix Comparison
-    real_corr = np.corrcoef(real_flat, rowvar=False)
-    syn_corr = np.corrcoef(syn_flat, rowvar=False)
+    # np.corrcoef emits NaN for constant columns and doesn't tolerate
+    # NaN/Inf in its input. Sanitize both before downstream linalg.
+    real_corr = _sanitize_correlation_matrix(
+        np.corrcoef(np.nan_to_num(real_flat, nan=0.0, posinf=0.0, neginf=0.0), rowvar=False)
+    )
+    syn_corr = _sanitize_correlation_matrix(
+        np.corrcoef(np.nan_to_num(syn_flat, nan=0.0, posinf=0.0, neginf=0.0), rowvar=False)
+    )
 
     # Handle scalar case (single feature)
     if np.isscalar(real_corr):
