@@ -167,11 +167,19 @@ def _set_validated(obj, field_name, value_str):
     Pydantic v2 doesn't validate on ``setattr`` by default, so we re-run
     ``model_validate`` on the full object after assignment to catch invalid
     values (bad types, failed Literal checks, failed field validators).
+
+    Tolerates fields that don't exist yet on the model — relevant for top-level
+    extras on ``ExperimentConfig`` (which has ``extra='allow'``): we simply
+    store the string value rather than trying to coerce to a non-existent
+    current type.
     """
     from pydantic import BaseModel
 
-    current = getattr(obj, field_name)
-    coerced = _coerce_value(current, value_str)
+    current = getattr(obj, field_name, None)
+    if current is None:
+        coerced = value_str
+    else:
+        coerced = _coerce_value(current, value_str)
     setattr(obj, field_name, coerced)
 
     if isinstance(obj, BaseModel):
