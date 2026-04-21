@@ -53,6 +53,132 @@ def load_config(config_path, validate=True):
     return ExperimentConfig(**raw_config)
 
 
+def parse_override_pair(spec: str):
+    """Split a single ``key.path=value`` override spec into (path_parts, value_str).
+
+    Only the first ``=`` is used as the separator so that values may contain
+    ``=`` themselves (e.g. file paths with query strings).
+    """
+    if '=' not in spec:
+        raise ValueError(
+            f"Override {spec!r} must be key=value (e.g. training.epochs=3)."
+        )
+    key_str, value_str = spec.split('=', 1)
+    if not key_str:
+        raise ValueError(f"Override {spec!r} has an empty key.")
+    return key_str.split('.'), value_str
+
+
+def _coerce_value(current, value_str: str):
+    """Coerce a string value to the type of an existing field.
+
+    Used when applying a CLI override onto a Pydantic config field. If the
+    current value is a bool, int, or float we coerce; otherwise we leave the
+    string as-is and let Pydantic validation decide.
+    """
+    if isinstance(current, bool):
+        lowered = value_str.strip().lower()
+        if lowered in ("true", "1", "yes"):
+            return True
+        if lowered in ("false", "0", "no"):
+            return False
+        raise ValueError(f"Cannot parse {value_str!r} as bool.")
+    if isinstance(current, int) and not isinstance(current, bool):
+        return int(value_str)
+    if isinstance(current, float):
+        return float(value_str)
+    return value_str
+
+
+def apply_overrides(config, overrides):
+    """Apply ``key.path=value`` overrides to a Pydantic ``ExperimentConfig``.
+
+    Overrides walk the nested model attributes. Validation happens via
+    Pydantic re-assignment so typos and invalid values raise immediately
+    rather than being silently ignored.
+
+    Supported paths:
+      - top-level fields: ``output_dir=...``, ``experiment_name=...``
+      - ``data.<field>``, ``training.<field>``, ``model.<field>``,
+        ``evaluation.<field>``.
+    """
+    if not overrides:
+        return
+
+    for spec in overrides:
+        parts, value_str = parse_override_pair(spec)
+        if not parts:
+            raise ValueError(f"Empty override path in {spec!r}")
+
+        head, *tail = parts
+
+        # Resolve the target object (typed sub-config for known sections,
+        # otherwise the root config itself).
+        if head == 'training':
+            target = config.get_training_config()
+        elif head == 'model':
+            target = config.get_model_config()
+        elif head == 'evaluation':
+            target = config.get_evaluation_config()
+        elif head == 'data':
+            target = config.data
+        else:
+            # Top-level root field — path should be exactly one segment
+            if tail:
+                raise ValueError(
+                    f"Unknown top-level override section {head!r} in {spec!r}."
+                )
+            _set_validated(config, head, value_str)
+            continue
+
+        if len(tail) != 1:
+            raise ValueError(
+                f"Override {spec!r} must be of the form '{head}.<field>=value'."
+            )
+
+        field_name = tail[0]
+        if not hasattr(target, field_name):
+            raise ValueError(
+                f"Override field {head}.{field_name!r} not found on "
+                f"{type(target).__name__}."
+            )
+        _set_validated(target, field_name, value_str)
+
+        # For sub-configs that are *not* the same object as config.<head>
+        # (training/model/evaluation are re-materialized each call), also
+        # write the override back through the raw dict so subsequent
+        # get_*_config() calls return the updated value.
+        if head == 'training':
+            config.training = target
+            if hasattr(config, '_cached_training_config'):
+                object.__setattr__(config, '_cached_training_config', target)
+        elif head == 'model':
+            # model is stored as a dict on the root config; sync it back.
+            config.model = target.model_dump() if hasattr(target, 'model_dump') else dict(target)
+            if hasattr(config, '_cached_model_config'):
+                object.__setattr__(config, '_cached_model_config', target)
+        elif head == 'evaluation':
+            config.evaluation = target
+
+
+def _set_validated(obj, field_name, value_str):
+    """Set a Pydantic model field with type-coerced value, triggering validation.
+
+    Pydantic v2 doesn't validate on ``setattr`` by default, so we re-run
+    ``model_validate`` on the full object after assignment to catch invalid
+    values (bad types, failed Literal checks, failed field validators).
+    """
+    from pydantic import BaseModel
+
+    current = getattr(obj, field_name)
+    coerced = _coerce_value(current, value_str)
+    setattr(obj, field_name, coerced)
+
+    if isinstance(obj, BaseModel):
+        # Re-validate. Any failure (type, literal, custom validator) raises.
+        type(obj).model_validate(obj.model_dump())
+
+
 def setup_experiment(config, experiment_number, model_name):
     """
     Set up experiment folder structure for model-specific runs.
@@ -125,10 +251,28 @@ def main():
     parser.add_argument("--resume-from-checkpoint", type=str, help="Path to checkpoint file to resume training from")
     parser.add_argument("--resume-latest", action="store_true", help="Resume from latest checkpoint in experiment directory")
     parser.add_argument("--list-checkpoints", action="store_true", help="List available checkpoints and exit")
+    parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="KEY.PATH=VALUE",
+        help=(
+            "Override a config field, e.g. --override training.epochs=3. "
+            "Supports dotted paths into training, model, data, evaluation, "
+            "or top-level fields. May be given multiple times. Validated by Pydantic."
+        ),
+    )
     args = parser.parse_args()
 
     # Load config
     config = load_config(args.config)
+
+    # Apply any --override specs before further setup
+    if args.override:
+        apply_overrides(config, args.override)
+        print(f"Applied {len(args.override)} config override(s):")
+        for ov in args.override:
+            print(f"  {ov}")
 
     # Setup experiment structure
     experiment_dir, model_name = setup_experiment(config, args.experiment_number, args.model_name)
