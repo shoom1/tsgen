@@ -97,14 +97,17 @@ class StylizedFactsEvaluator(MetricEvaluator):
         # Cache raw results for downstream plotting (avoids recomputation)
         self.last_raw_results = sf_metrics
 
+        # Use nanmean so per-feature NaN (e.g. from a rare zero-variance column
+        # produced by some baselines on staggered-IPO data) doesn't poison the
+        # whole summary metric.
         return {
-            "kurtosis_diff_mean": float(np.mean(sf_metrics['kurtosis_diff'])),
-            "skew_diff_mean": float(np.mean(sf_metrics['skew_diff'])),
+            "kurtosis_diff_mean": float(np.nanmean(sf_metrics['kurtosis_diff'])),
+            "skew_diff_mean": float(np.nanmean(sf_metrics['skew_diff'])),
             "acf_ret_diff_mse": float(sf_metrics['acf_ret_diff']),
             "acf_sq_ret_diff_mse": float(sf_metrics['acf_sq_ret_diff']),
             "corr_matrix_norm_diff": float(sf_metrics['corr_matrix_diff_norm']),
-            "var_diff_mean": float(np.mean(sf_metrics['var_diff'])),
-            "es_diff_mean": float(np.mean(sf_metrics['es_diff'])),
+            "var_diff_mean": float(np.nanmean(sf_metrics['var_diff'])),
+            "es_diff_mean": float(np.nanmean(sf_metrics['es_diff'])),
         }
 
 

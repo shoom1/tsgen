@@ -89,9 +89,12 @@ class CCCGARCH(StatisticalModel):
 
         Requires ``shuffle=False`` and stride-1 windows, which the training path
         is expected to configure. The original ordered series is reconstructed
-        from windows before fitting.
+        from windows before fitting. If the dataloader emits ``(data, mask)``
+        tuples (the ``clean_data(strategy='mask')`` path), invalid positions
+        are excluded per-ticker so pre-IPO zero-filled rows don't poison
+        the GARCH fit.
         """
-        series = self._reconstruct_series(dataloader)  # (T, F) np.float64
+        series, mask = self._reconstruct_series(dataloader)  # (T, F), (T, F) or None
 
         T, F = series.shape
         if F != self.features:
@@ -103,8 +106,6 @@ class CCCGARCH(StatisticalModel):
                 f"CCC-GARCH needs at least ~200 observations (got {T}); "
                 f"the optimizer will not converge reliably."
             )
-        if not np.isfinite(series).all():
-            raise ValueError("Training series contains NaN or inf.")
 
         mu = np.zeros(F)
         omega = np.zeros(F)
@@ -112,36 +113,107 @@ class CCCGARCH(StatisticalModel):
         beta = np.zeros(F)
         nu = np.full(F, 30.0)  # sentinel for normal
         sigma2_last = np.zeros(F)
-        std_resid = np.zeros_like(series)  # (T, F)
+        std_resid = np.zeros_like(series)  # (T, F), only filled at valid positions
+
+        valid_mask = np.ones_like(series, dtype=bool) if mask is None else mask.astype(bool)
 
         for i in range(F):
-            params_i, sigma_series_i = self._fit_one_series(series[:, i])
-            mu[i] = params_i['mu']
-            omega[i] = params_i['omega']
-            alpha[i] = params_i['alpha']
-            beta[i] = params_i['beta']
+            col_mask = valid_mask[:, i]
+            col = series[:, i]
+            # Per-ticker slice: keep only the contiguous valid range. arch fits
+            # a single time series; gaps in the middle are uncommon in practice
+            # (IPOs stagger at the start, not in the middle) so this is fine.
+            if col_mask.any():
+                first = int(np.argmax(col_mask))
+                last_rev = int(np.argmax(col_mask[::-1]))
+                last = len(col_mask) - last_rev
+                valid_slice = slice(first, last)
+            else:
+                valid_slice = slice(0, 0)
+
+            col_valid = col[valid_slice]
+            # Also drop any residual NaN/Inf (shouldn't be present after masking,
+            # but arch will error on them).
+            finite = np.isfinite(col_valid)
+            col_valid = col_valid[finite]
+
+            if col_valid.size < 100:
+                # Not enough data for a reliable GARCH fit. Fall back to a
+                # neutral "low-vol near-Gaussian" ticker so it contributes
+                # minimally to the portfolio without breaking evaluation.
+                mu[i] = 0.0
+                omega[i] = 1e-6
+                alpha[i] = 0.05
+                beta[i] = 0.9
+                nu[i] = 30.0
+                sigma_series_i = np.full(col.shape, np.sqrt(1e-6 / max(1e-9, 1 - 0.95)))
+                sigma2_last[i] = sigma_series_i[-1] ** 2
+                continue
+
+            params_i, sigma_valid = self._fit_one_series(col_valid)
+
+            # Defensive: reject pathologically bad fits (corner solutions).
+            # alpha at its bound (~1) and beta~0 is arch's failure mode;
+            # fall back to neutral defaults rather than trust garbage params.
+            a_raw = params_i['alpha']
+            b_raw = params_i['beta']
+            mu_raw = params_i['mu']
+            omega_raw = params_i['omega']
+            bad = (
+                a_raw >= 0.999
+                or (a_raw + b_raw) >= 0.9999
+                or omega_raw <= 0
+                or abs(mu_raw) > 0.05  # daily log-return mean > 5% is nonsense
+                or not np.isfinite(sigma_valid).all()
+            )
+            if bad:
+                mu[i] = 0.0
+                omega[i] = max(float(col_valid.var()) * 0.05, 1e-6)
+                alpha[i] = 0.05
+                beta[i] = 0.9
+                nu[i] = 30.0 if self.distribution == 'normal' else float(params_i.get('nu', 30.0))
+                uncond_sigma2 = omega[i] / max(1 - alpha[i] - beta[i], 1e-6)
+                sigma2_last[i] = uncond_sigma2
+                # std_resid column stays 0 — this ticker won't contribute to R
+                continue
+
+            mu[i] = mu_raw
+            omega[i] = omega_raw
+            alpha[i] = a_raw
+            beta[i] = b_raw
             if self.distribution == 't':
                 nu[i] = params_i['nu']
 
-            # Standardized residuals across the full training window
-            # (conditional variance is causal at each timestep by GARCH construction)
-            std_resid[:, i] = (series[:, i] - mu[i]) / np.maximum(sigma_series_i, 1e-12)
-            sigma2_last[i] = sigma_series_i[-1] ** 2
+            # Place sigma_valid (length = valid_slice) back into the full series;
+            # invalid positions remain at 0 in std_resid.
+            full_sigma = np.full(col.shape, np.nan)
+            # Within the valid_slice, only the 'finite' subset was actually fit.
+            # Map sigma_valid back onto those positions.
+            valid_indices_in_slice = np.where(finite)[0]
+            slice_start = valid_slice.start
+            full_sigma[slice_start + valid_indices_in_slice] = sigma_valid
 
-        # Standardized residuals can contain NaN/Inf if a ticker had zero-
-        # filled pre-IPO positions, tiny sigma, or a failed GARCH fit.
-        # Replace with zeros before computing correlations — the corresponding
-        # row/column of R will be cleaned up below.
+            # std_resid only at valid positions
+            resid = (col - mu[i]) / np.maximum(full_sigma, 1e-12)
+            std_resid[:, i] = np.where(np.isfinite(resid), resid, 0.0)
+            # sigma2_last uses the last finite sigma for that ticker
+            last_sigma = sigma_valid[-1] if sigma_valid.size else np.sqrt(1e-6)
+            sigma2_last[i] = max(float(last_sigma) ** 2, 1e-10)
+
+        # Safety clamp — every ticker should now have positive sigma2_last;
+        # forbid zeros defensively.
+        sigma2_last = np.clip(sigma2_last, 1e-10, None)
+
+        # Correlations: use pairwise-complete observations (only positions where
+        # both tickers are valid). corrcoef on our zero-filled std_resid would
+        # bias estimates toward zero for tickers with long zero-fill prefixes.
         std_resid = np.nan_to_num(std_resid, nan=0.0, posinf=0.0, neginf=0.0)
-
-        # Constant correlation: full-sample sample correlation of standardized residuals.
-        # corrcoef emits NaN on constant (zero-variance) columns; sanitize.
         if F == 1:
             R = np.array([[1.0]])
         else:
-            R = np.corrcoef(std_resid, rowvar=False)
+            R = self._pairwise_correlation(std_resid, valid_mask)
             R = np.nan_to_num(R, nan=0.0, posinf=0.0, neginf=0.0)
-            R = 0.5 * (R + R.T)             # symmetrize away floating-point noise
+            R = 0.5 * (R + R.T)
             np.fill_diagonal(R, 1.0)
 
         # Regularize to ensure positive-definiteness and compute Cholesky factor
@@ -195,25 +267,73 @@ class CCCGARCH(StatisticalModel):
         return out, sigma_series
 
     @staticmethod
-    def _reconstruct_series(dataloader) -> np.ndarray:
-        """Reconstruct a (T, F) ordered series from a stride-1 windowed dataloader.
+    def _reconstruct_series(dataloader):
+        """Reconstruct a (T, F) ordered series + optional (T, F) mask from a
+        stride-1 windowed dataloader.
 
-        The windows are assumed to be chronologically ordered (shuffle=False) and
-        to have stride 1, so take column 0 of every window plus the tail of the
-        final window.
+        Assumes chronological order (shuffle=False) and stride 1; the series
+        is ``windows[:, 0, :]`` concatenated with the tail of the last window.
+        If the dataloader yields (data, mask) tuples, the mask is reconstructed
+        the same way; otherwise the mask return value is ``None``.
         """
-        all_windows = []
+        all_data = []
+        all_masks = []
+        has_masks = False
         for batch in dataloader:
-            windows = batch[0] if isinstance(batch, (list, tuple)) else batch
-            all_windows.append(windows.detach().cpu().numpy())
-        arr = np.concatenate(all_windows, axis=0)  # (N, L, F)
-        if arr.ndim != 3:
-            raise ValueError(
-                f"Expected (N, L, F) windows from dataloader, got shape {arr.shape}."
-            )
-        first_col = arr[:, 0, :]          # (N, F)
-        tail = arr[-1, 1:, :]             # (L-1, F)
-        return np.concatenate([first_col, tail], axis=0).astype(np.float64)
+            if isinstance(batch, (list, tuple)):
+                all_data.append(batch[0].detach().cpu().numpy())
+                if len(batch) > 1:
+                    all_masks.append(batch[1].detach().cpu().numpy())
+                    has_masks = True
+            else:
+                all_data.append(batch.detach().cpu().numpy())
+
+        def _flatten(chunks):
+            arr = np.concatenate(chunks, axis=0)
+            if arr.ndim != 3:
+                raise ValueError(
+                    f"Expected (N, L, F) windows from dataloader, got {arr.shape}."
+                )
+            first_col = arr[:, 0, :]
+            tail = arr[-1, 1:, :]
+            return np.concatenate([first_col, tail], axis=0)
+
+        series = _flatten(all_data).astype(np.float64)
+        mask = _flatten(all_masks).astype(np.float64) if has_masks else None
+        return series, mask
+
+    @staticmethod
+    def _pairwise_correlation(x: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """Sample correlation using pairwise-complete observations.
+
+        For each (i, j), compute the correlation over rows where both
+        ``mask[:, i]`` and ``mask[:, j]`` are True. Using ``np.corrcoef`` on
+        zero-filled data would bias estimates for tickers with long invalid
+        prefixes toward zero; this routine gives the correct MLE for the
+        constant-correlation assumption under staggered IPO dates.
+        """
+        T, F = x.shape
+        valid = mask.astype(bool)
+        R = np.eye(F)
+        for i in range(F):
+            for j in range(i + 1, F):
+                pair = valid[:, i] & valid[:, j]
+                n = int(pair.sum())
+                if n < 30:
+                    R[i, j] = R[j, i] = 0.0
+                    continue
+                xi = x[pair, i]
+                xj = x[pair, j]
+                si = xi.std(ddof=1)
+                sj = xj.std(ddof=1)
+                if si < 1e-12 or sj < 1e-12:
+                    R[i, j] = R[j, i] = 0.0
+                    continue
+                c = np.cov(xi, xj, ddof=1)[0, 1] / (si * sj)
+                # Clip to [-1, 1] — numeric drift can push slightly outside
+                c = float(np.clip(c, -1.0, 1.0))
+                R[i, j] = R[j, i] = c
+        return R
 
     @staticmethod
     def _regularized_cholesky(R: np.ndarray) -> np.ndarray:

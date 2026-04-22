@@ -155,3 +155,114 @@ class TestCCCGARCHFitRobustness:
         np.testing.assert_allclose(np.diag(R), 1.0, atol=1e-6)
         L = model.L.numpy()
         assert np.isfinite(L).all()
+
+    # --- Quality tests (not just "doesn't crash") ---
+    #
+    # When fed real-world-like data with pre-IPO zero runs, the fit should
+    # recover plausible parameters: mu small (it's a daily log-return mean),
+    # sigma2_last > 0 (otherwise generated samples are constant at mu), and
+    # generated samples should have non-zero variance per feature.
+
+    def test_fit_recovers_plausible_mu_with_pre_ipo_zeros(self):
+        """Pre-IPO zero-fill should NOT inflate mu into implausible values.
+
+        The real 100-ticker run had mu in [-2.1, 2.5] (log-return units),
+        which is physically impossible (daily log-return mean of 2 = 7x
+        per day). Caused by leading zeros dominating the mean estimate.
+        """
+        from tsgen.models.garch import CCCGARCH
+
+        rng = np.random.default_rng(13)
+        T, F = 3000, 5
+        real_mu_per_day = 0.0005
+        series = rng.normal(real_mu_per_day, 0.02, size=(T, F)).astype(np.float32)
+        # Ticker 1 and 3 have long pre-IPO zero runs (common in real data)
+        series[:1500, 1] = 0.0
+        series[:2000, 3] = 0.0
+
+        model = CCCGARCH(features=F, distribution='t')
+        model.fit(self._make_loader(series))
+
+        mu = model.mu.numpy()
+        # Daily log-return means should be tiny. Anything above 0.01 is wrong.
+        assert np.abs(mu).max() < 0.01, (
+            f'mu out of plausible range: {mu}; pre-IPO zeros are skewing fits.'
+        )
+
+    def test_sigma2_last_never_exactly_zero(self):
+        """sigma2_last=0 makes every generated step equal mu (constant sequence)."""
+        from tsgen.models.garch import CCCGARCH
+
+        rng = np.random.default_rng(14)
+        T, F = 3000, 5
+        series = rng.normal(0, 0.02, size=(T, F)).astype(np.float32)
+        series[:2500, 2] = 0.0  # ticker 2 only has 500 observations
+
+        model = CCCGARCH(features=F, distribution='t')
+        model.fit(self._make_loader(series))
+
+        assert (model.sigma2_last > 0).all(), (
+            f'sigma2_last has zeros: {model.sigma2_last}; '
+            'generated samples would be constant.'
+        )
+
+    def test_generated_samples_have_nonzero_variance_per_feature(self):
+        """Canary for degenerate fits: every feature column in generated
+        samples must have strictly positive variance."""
+        from tsgen.models.garch import CCCGARCH
+
+        rng = np.random.default_rng(15)
+        T, F = 3000, 5
+        series = rng.normal(0, 0.02, size=(T, F)).astype(np.float32)
+        series[:1500, 1] = 0.0
+        series[:2000, 3] = 0.0
+
+        model = CCCGARCH(features=F, distribution='t')
+        model.fit(self._make_loader(series))
+
+        samples = model.generate(n_samples=20, seq_len=100).numpy()
+        # (20, 100, 5) - compute std per feature across all sample/time entries
+        flat = samples.reshape(-1, F)
+        stds = flat.std(axis=0)
+        assert (stds > 1e-6).all(), (
+            f'Feature std degenerate: {stds}; fit collapsed for some ticker.'
+        )
+        assert np.isfinite(samples).all(), 'Generated NaN/Inf samples.'
+
+
+class TestBootstrapQuality:
+    """Bootstrap must skip pre-IPO zero-fill rows when reconstructing history."""
+
+    def _make_loader(self, series, window_len=64):
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        T, F = series.shape
+        n = T - window_len + 1
+        w = np.empty((n, window_len, F), dtype=np.float32)
+        for i in range(n):
+            w[i] = series[i:i + window_len]
+        ds = TensorDataset(torch.from_numpy(w))
+        return DataLoader(ds, batch_size=64, shuffle=False)
+
+    def test_bootstrap_skips_pre_ipo_zero_rows(self):
+        """If ticker B has zeros for rows [0:1500], bootstrap should NOT
+        include those rows in the resampling pool — otherwise generated
+        samples will include constant-zero stretches."""
+        from tsgen.models.baselines import BootstrapGenerativeModel
+
+        rng = np.random.default_rng(16)
+        T, F = 3000, 3
+        series = rng.normal(0, 0.02, size=(T, F)).astype(np.float32)
+        series[:1500, 1] = 0.0
+        series[:2000, 2] = 0.0
+
+        model = BootstrapGenerativeModel(features=F, sequence_length=64, block_p=0.2)
+        model.fit(self._make_loader(series))
+
+        # Every feature column in the history must have non-trivial variance.
+        h = model.history.numpy()
+        stds = h.std(axis=0)
+        assert (stds > 0.005).all(), (
+            f'Bootstrap history still has near-constant columns: {stds}. '
+            'Pre-IPO zero rows were not filtered.'
+        )

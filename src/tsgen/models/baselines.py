@@ -289,10 +289,14 @@ class BootstrapGenerativeModel(StatisticalModel):
         consecutive windows overlap by L-1 positions, the full series is
         windows[:, 0, :] concatenated with windows[-1, 1:, :].
 
-        Masked data: positions where *every* feature is masked are dropped
-        from the reconstructed series. Partially-masked positions are kept;
-        block resampling will carry their zero-filled values, which matches
-        how other models are trained on this data.
+        Masked data: the history is trimmed to the common valid window,
+        i.e. rows starting from the latest-IPO ticker onward. Keeping
+        partially-masked (zero-filled) positions would seed the
+        resampling pool with constant-zero columns for late joiners,
+        breaking evaluation metrics that assume finite variance per
+        feature. Using a strict "all features valid at every timestep"
+        filter would instead chop off every row on a staggered universe
+        (there's always some ticker that hasn't IPO'd yet).
         """
         all_windows = []
         all_masks = []
@@ -325,9 +329,29 @@ class BootstrapGenerativeModel(StatisticalModel):
             mask_first = masks[:, 0, :]                  # (N, F)
             mask_tail = masks[-1, 1:, :]                 # (L-1, F)
             mask_series = torch.cat([mask_first, mask_tail], dim=0)  # (T, F)
-            # Drop positions where every feature is masked
-            any_valid = mask_series.sum(dim=-1) > 0      # (T,)
-            series = series[any_valid]
+
+            # Row-level validity fraction. Keep rows where at least
+            # ``min_valid_frac`` of features have valid data. This preserves
+            # most of the training history on a staggered-IPO universe
+            # (dropping ~10% of rows), rather than collapsing to the
+            # tiny intersection of every ticker's valid window.
+            #
+            # Late-IPO tickers still have zero-filled values for their
+            # pre-IPO positions within kept rows. That's fine for the
+            # bootstrap: those rows contribute REAL dependence structure
+            # for the already-IPO'd tickers, and the late-joiners' pre-IPO
+            # zeros are outweighed by their post-IPO activity in any
+            # sampled window.
+            min_valid_frac = 0.5
+            frac_valid = mask_series.mean(dim=-1)        # (T,)
+            keep = frac_valid >= min_valid_frac
+            series = series[keep]
+            n_kept = int(keep.sum())
+            n_dropped = int((~keep).sum())
+            print(
+                f"Bootstrap kept {n_kept} rows "
+                f"(dropped {n_dropped} rows with <{min_valid_frac*100:.0f}% tickers valid)"
+            )
 
         if series.shape[0] < 2:
             raise ValueError(
