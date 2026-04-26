@@ -47,7 +47,14 @@ except ImportError as e:
     )
 
 
-def load_prices(tickers, start_date, end_date, column='adj_close', db_path=None):
+def load_prices(
+    tickers,
+    start_date,
+    end_date,
+    column='adj_close',
+    db_path=None,
+    allow_missing=False,
+):
     """
     Load price data from database.
 
@@ -58,6 +65,8 @@ def load_prices(tickers, start_date, end_date, column='adj_close', db_path=None)
         column: Price column to load (default: 'adj_close')
             Options: 'open', 'high', 'low', 'close', 'adj_close', 'volume'
         db_path: Optional database path (auto-detects via ~/.finbaserc if None)
+        allow_missing: If False, raise when any requested ticker is missing.
+            If True, silently keep the available requested tickers.
 
     Returns:
         pd.DataFrame: Wide format DataFrame with:
@@ -87,11 +96,30 @@ def load_prices(tickers, start_date, end_date, column='adj_close', db_path=None)
         data = data.reset_index()
         data = data.pivot(index='date', columns='symbol', values=column)
 
-        # Reorder columns to match requested tickers
+        if tickers:
+            # Reorder columns to match requested tickers
+            available_symbols = [s for s in tickers if s in data.columns]
+            missing = [s for s in tickers if s not in data.columns]
+            if missing and not allow_missing:
+                raise ValueError(
+                    f"Missing data for {len(missing)} requested symbols: "
+                    f"{missing[:10]}. Load them in finbase first, or pass "
+                    "allow_missing=True if a partial universe is intentional."
+                )
+            if missing:
+                print(f"Warning: {len(missing)} symbols missing data: {missing[:10]}...")
+            data = data[available_symbols]
+    elif tickers:
+        missing = [s for s in tickers if s not in data.columns]
+        if missing and not allow_missing:
+            raise ValueError(
+                f"Missing data for {len(missing)} requested symbols: "
+                f"{missing[:10]}. Load them in finbase first, or pass "
+                "allow_missing=True if a partial universe is intentional."
+            )
         available_symbols = [s for s in tickers if s in data.columns]
-        if len(available_symbols) < len(tickers):
-            missing = set(tickers) - set(available_symbols)
-            print(f"Warning: {len(missing)} symbols missing data: {list(missing)[:10]}...")
+        if missing:
+            print(f"Warning: {len(missing)} symbols missing data: {missing[:10]}...")
         data = data[available_symbols]
 
     # Validate

@@ -43,7 +43,9 @@ import yaml
 
 HEADLINE_METRICS = [
     # (key, pretty label, best_direction) — 'close_to_half', 'lower', 'higher'
+    ('evaluation_failed_count', 'Eval Failures', 'lower'),
     ('discriminator_accuracy', 'Disc. Acc. (best 0.5)', 'close_to_half'),
+    ('discriminator_auc', 'Disc. AUC (best 0.5)', 'close_to_half'),
     ('tstr_mse', 'TSTR MSE', 'lower'),
     ('kurtosis_diff_mean', 'Kurt Δ', 'lower'),
     ('skew_diff_mean', 'Skew Δ', 'lower'),
@@ -180,7 +182,7 @@ def main() -> int:
         model = infer_model_type(exp_dir) or '(unknown)'
         row = {'experiment': exp_dir.name, 'model': model}
         for key, label, _direction in HEADLINE_METRICS:
-            row[label] = metrics.get(key)
+            row[label] = metrics.get(key, 0.0 if key == 'evaluation_failed_count' else None)
         rows.append(row)
 
     if not rows:

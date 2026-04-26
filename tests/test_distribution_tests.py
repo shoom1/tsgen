@@ -41,3 +41,16 @@ def test_run_all_tests():
     assert "Anderson-Darling" in results
     
     assert results["Kolmogorov-Smirnov"]["statistic"] >= 0
+    assert results["Kolmogorov-Smirnov"]["n_features"] == 5
+    assert results["Kolmogorov-Smirnov"]["sample_method"] == "per_feature_non_overlapping_windows"
+
+
+def test_run_all_tests_reduces_overlapping_windows_by_feature():
+    s1 = np.random.randn(20, 5, 3)
+    s2 = np.random.randn(20, 5, 3)
+
+    results = run_all_distribution_tests(s1, s2)
+
+    assert results["Kolmogorov-Smirnov"]["n_features"] == 3
+    # 20 windows sampled every sequence_length=5 -> 4 windows * 5 steps.
+    assert results["Kolmogorov-Smirnov"]["sample_size_min"] == 20

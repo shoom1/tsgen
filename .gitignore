@@ -1,6 +1,7 @@
 # Documentation - AI agent instructions
 GEMINI.md
 CLAUDE.md
+AGENT.md
 .claude/
 .gemini/
 

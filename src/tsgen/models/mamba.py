@@ -91,7 +91,18 @@ class MambaBlock(nn.Module):
     # Chunk size for the parallel scan. Small enough to keep
     #   exp(cumsum(log dA)) within float32 range even when |log dA| is large,
     # large enough that the chunked loop iterates few times.
-    _SSM_CHUNK_SIZE = 16
+    _SSM_CHUNK_SIZE = 8
+
+    # Lower bound on log(dA) per step. This is part of the discretized SSM
+    # used by both scan paths. It prevents ``1/cumprod`` overflow inside
+    # ``_ssm_parallel`` when delta values drift large during training (observed
+    # in the 2026-04-21 Colab run: without this clamp, Mamba loss went NaN at
+    # step 60). With ``_SSM_CHUNK_SIZE=8`` and ``log_dA>=-5``, the minimum
+    # ``cumprod`` value within a chunk is ``exp(-40) ≈ 4e-18``, safely within
+    # float32 normal range (~1e-38 floor). At default Mamba init the dynamic
+    # range of ``log_dA`` is ~(-1.6, 0], so this clamp only activates when
+    # training would otherwise produce non-finite outputs.
+    _SSM_LOG_DA_MIN = -5.0
 
     def ssm(self, x):
         """Runs the SSM recurrence via parallel selective scan.
@@ -101,7 +112,8 @@ class MambaBlock(nn.Module):
 
         The implementation uses the Heinsen parallel scan (chunked for
         numerical stability). Equivalent to ``_ssm_sequential`` within
-        float32 tolerance; see tests/test_mamba_parallel_scan.py.
+        float32 tolerance because both paths use the same clipped
+        discretization; see tests/test_mamba_parallel_scan.py.
         """
         return self._ssm_parallel(x)
 
@@ -122,6 +134,11 @@ class MambaBlock(nn.Module):
         A = -torch.exp(self.A_log.float())           # (d_inner, d_state)
         return delta, B_proj, C_proj, A
 
+    def _compute_dA(self, delta, A):
+        """Discretize A for one scan step using the model's stability clamp."""
+        log_dA = torch.einsum("bd,dn->bdn", delta, A).clamp(min=self._SSM_LOG_DA_MIN)
+        return torch.exp(log_dA)
+
     def _ssm_sequential(self, x):
         """Reference scan: explicit Python loop. Retained for correctness
         validation of the parallel path (tests) and for readability."""
@@ -133,7 +150,7 @@ class MambaBlock(nn.Module):
 
         for t in range(seq_len):
             dt = delta[:, t, :]                       # (B, D)
-            dA = torch.exp(torch.einsum("bd,dn->bdn", dt, A))   # (B, D, N)
+            dA = self._compute_dA(dt, A)                 # (B, D, N)
             Bt = B_proj[:, t, :]                      # (B, N)
             xt = x[:, t, :]                           # (B, D)
             dB = torch.einsum("bd,bn->bdn", dt, Bt)   # (B, D, N)
@@ -190,7 +207,9 @@ class MambaBlock(nn.Module):
             B_ck_proj = B_proj[:, start:end]              # (B, k, N)
             x_ck_in = x[:, start:end]                     # (B, k, D)
 
-            dA_ck = torch.exp(delta_ck.unsqueeze(-1) * A_bcast)             # (B, k, D, N)
+            # log_dA is delta * A (A negative), clamped from below for stability
+            log_dA_ck = (delta_ck.unsqueeze(-1) * A_bcast).clamp(min=self._SSM_LOG_DA_MIN)
+            dA_ck = torch.exp(log_dA_ck)                                     # (B, k, D, N)
             b_ck = (
                 delta_ck.unsqueeze(-1)
                 * B_ck_proj.unsqueeze(-2)

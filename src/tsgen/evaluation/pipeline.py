@@ -110,6 +110,14 @@ class EvaluationPipeline:
 
         if failed:
             all_metrics['_failed_evaluators'] = failed
+        failure_metrics = {"evaluation_failed_count": float(len(failed))}
+        for evaluator in self.evaluators:
+            failure_metrics[f"evaluation_{evaluator.name}_failed"] = float(
+                evaluator.name in failed
+            )
+        all_metrics.update(failure_metrics)
+        if self.tracker:
+            self.tracker.log_metrics(failure_metrics)
         all_metrics['_raw_results'] = raw_results
 
         return all_metrics
