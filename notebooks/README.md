@@ -42,7 +42,7 @@ The notebook has 9 sections you run top-to-bottom:
 3. **Copy DB to Colab local disk** — one-time ~10s operation. SQLite over Drive-mount is painfully slow; local copy makes queries fast.
 4. **Install dependencies** — `pip install finbase arch ...` plus cloning/installing `tsgen` from `github.com/shoom1/tsgen` at the `develop` branch. The notebook records the exact git SHA in `My Drive/tsgen/runs/run_manifest.json`; set `PINNED_COMMIT` in the install cell for immutable reruns.
 5. **Generate experiment configs** — runs `scripts/generate_standard_configs.py` to materialize `experiments/00*/config.yaml` (not shipped in the repo since they're personal research artifacts).
-6. **Run experiments** — the main training cell. Each experiment saves to `My Drive/tsgen/runs/<exp_name>/`, streams stdout to `colab_stdout.log`, and raises if any subprocess fails.
+6. **Run experiments** — the main training cell. Each experiment saves to `My Drive/tsgen/runs/<exp_name>/`, lets progress bars render directly in the Colab output, and raises if any subprocess fails.
 7. **Inspect artifacts** — quick file listing of what ended up on Drive.
 8. **Aggregate refreshed metrics** — writes `summary.csv` and `summary.md` to Drive and fails if any evaluator logged a nonzero failure count.
 9. **(Optional) smoke test** — re-run every config at a tiny budget to verify end-to-end wiring. Useful after pulling new code.
