@@ -5,7 +5,7 @@ A research framework for generating realistic synthetic financial time series
 using Denoising Diffusion Probabilistic Models (DDPM).
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # Import key functions for easy access
 from tsgen.train import train_model

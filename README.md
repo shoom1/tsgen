@@ -1,300 +1,302 @@
 # tsgen
 
-> Synthetic Financial Time Series Generation using Diffusion Models
+> Synthetic financial time-series generation and evaluation for research workflows.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-0.4.1-blue.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A research framework for generating realistic synthetic financial time series using Denoising Diffusion Probabilistic Models (DDPM). The project benchmarks deep learning architectures (UNet, Transformer) against classical baselines (Multivariate GBM, Bootstrap) for capturing "Stylized Facts" of financial returns.
+`tsgen` benchmarks generative models for multi-asset financial return series.
+It includes diffusion models, TimeVAE, Mamba, DiT, DiffWave, and classical
+baselines, with evaluation focused on whether generated samples preserve
+stylized facts, cross-asset dependence, tail-risk behavior, and out-of-sample
+distinguishability.
 
-## Purpose
+The framework is research-oriented: evaluation methodology is treated as part
+of the product, not as a throwaway script.
 
-- Generate realistic synthetic time series for Monte Carlo simulations (e.g., Counterparty Credit Risk modeling)
-- Create training data augmentation for financial ML models
-- Research and benchmark generative models for financial time series
-- Preserve key statistical properties: fat tails, volatility clustering, cross-asset correlations
+## Current Status
 
-## Features
+Version `0.4.1` includes the April 2026 methodology refresh:
 
-- **Deep Learning Models**: UNet1D, Diffusion Transformer, TimeVAE
-- **Classical Baselines**: Geometric Brownian Motion (GBM), Bootstrap resampling, Multivariate LogNormal
-- **Comprehensive Evaluation**:
-  - Stylized facts (kurtosis, skewness, volatility clustering)
-  - Discriminator accuracy (distinguishability test)
-  - Distribution tests (KS, Cramér-von Mises, Anderson-Darling)
-  - TSTR (Train on Synthetic, Test on Real)
-  - Correlation structure preservation
-- **Composable Data Pipeline**: Flexible functions for loading, cleaning, processing time series
-- **Experiment Management**: Track and organize multiple experiments with configs and results
-- **Database Integration**: Uses `findata` project for historical market data management
+- chronological held-out evaluation windows when configs declare a split;
+- discriminator train/test split with held-out accuracy and AUC;
+- per-feature distribution tests on reduced-overlap windows;
+- explicit evaluator failure metrics in aggregate summaries;
+- fail-fast behavior when requested tickers are missing from `finbase`;
+- stabilized Mamba scan discretization;
+- Colab benchmark workflow that records the exact git SHA and aggregates runs.
 
-## Quick Start
+Recent full benchmark runs completed successfully with `Eval Failures = 0`,
+but the held-out discriminator still separates real and synthetic samples
+almost perfectly. Treat that as a research finding: the current models should
+not be described as producing indistinguishable synthetic market data.
+
+## Models
+
+Neural models:
+
+- `unet` - 1D U-Net diffusion model
+- `transformer` - diffusion transformer
+- `mamba` - Mamba-style diffusion model
+- `diffwave` - DiffWave-style 1D diffusion model
+- `dit` - DiT-style 1D diffusion transformer
+- `timevae` - variational autoencoder baseline
+
+Classical baselines:
+
+- `multivariate_gaussian` - full-covariance Gaussian baseline on returns
+- `bootstrap` - stationary/block bootstrap baseline
+- `ccc_garch` - constant conditional correlation GARCH baseline
+
+## Evaluation
+
+The standard evaluation pipeline reports:
+
+- stylized facts: kurtosis, skewness, autocorrelation, volatility clustering;
+- correlation structure: matrix norm, eigenvalue fit, rolling-correlation stability;
+- distribution tests: per-feature KS, Cramer-von Mises, Anderson-Darling aggregates;
+- discriminator distinguishability: held-out accuracy and AUC;
+- TSTR: train on synthetic, test on real;
+- tail risk: VaR and expected shortfall differences;
+- evaluator health: `evaluation_failed_count` and per-evaluator failure flags.
+
+Use `scripts/aggregate_results.py` to build comparison tables:
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/yourusername/tsgen.git
-cd tsgen
-pip install -e .
+conda run -n tsgen python scripts/aggregate_results.py experiments/
+```
 
-# 2. Install findata dependency (for historical data access)
-cd ../findata  # or clone from https://github.com/yourusername/findata
+This writes:
+
+```text
+experiments/summary.csv
+experiments/summary.md
+```
+
+## Data Access
+
+Market data is loaded through `finbase.DataClient`.
+
+`tsgen` is a read-only consumer of the market database. Load and manage market
+data in `finbase`; use `tsgen` for generation, evaluation, and analysis.
+
+The database path is usually discovered from `~/.finbaserc`. A typical config:
+
+```yaml
+database:
+  path: /path/to/timeseries.db
+```
+
+Install `finbase` before running data-backed experiments:
+
+```bash
+pip install finbase
+```
+
+For local editable development, install the sibling project if applicable:
+
+```bash
+cd ../finbase
 pip install -e .
 cd ../tsgen
-
-# 3. Run a simple experiment
-tsgen --config experiments/example/config.yaml --mode train_eval
 ```
 
 ## Installation
 
-### Prerequisites
+Python 3.12+ is required.
 
-- **Python**: 3.12 or higher
-- **findata package**: Required for loading historical market data
-  - This is a separate package that manages the time series database
-  - Install from: `https://github.com/yourusername/findata`
-  - tsgen has read-only access to the database managed by findata
-
-### Install tsgen
-
-**Standard installation:**
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/tsgen.git
+git clone https://github.com/shoom1/tsgen.git
 cd tsgen
-
-# Install package
 pip install -e .
+```
 
-# With development dependencies (pytest, black, etc.)
+For development:
+
+```bash
 pip install -e ".[dev]"
 ```
 
-**Using Conda (recommended):**
+Recommended local environment:
+
 ```bash
-# Create and activate environment
 conda env create -f environment.yml
 conda activate tsgen
-
-# Install tsgen
 pip install -e .
 ```
 
-### Install findata dependency
+Verify the install:
 
 ```bash
-# Clone findata repository (sibling to tsgen)
-cd ..
-git clone https://github.com/yourusername/findata.git
-cd findata
-
-# Install findata
-pip install -e .
-
-# Return to tsgen
-cd ../tsgen
-```
-
-### Verify Installation
-
-```bash
-# Check that CLI commands are available
 tsgen --help
 tsgen-experiments --help
 tsgen-backtest --help
-
-# Test imports
-python -c "from tsgen import train_model, evaluate_model"
-python -c "from tsgen.models import create_model, UNet1D"
-python -c "from tsgen.data.pipeline import load_prices"
+python -c "from tsgen import train_model, evaluate_model; print('ok')"
 ```
 
-## Usage
+## Standard Benchmark Workflow
 
-### Command Line Interface
+Generate the standardized 10-run benchmark configs:
 
-**Train and evaluate a model:**
 ```bash
-# Train and evaluate with experiment config
-tsgen --config experiments/my_experiment/config.yaml --mode train_eval
-
-# Train only
-tsgen --config experiments/my_experiment/config.yaml --mode train
-
-# Evaluate only (requires existing model artifacts)
-tsgen --config experiments/my_experiment/config.yaml --mode eval
+conda run -n tsgen python scripts/generate_standard_configs.py
 ```
 
-**Experiment management:**
+Run a quick end-to-end smoke test:
+
 ```bash
-# List all experiments
-tsgen-experiments list
-
-# Show experiment details
-tsgen-experiments info <experiment_number>
-
-# Create new experiment
-tsgen-experiments create my_experiment --model unet --description "Test UNet on 3 stocks"
-
-# Open experiment directory
-tsgen-experiments open <experiment_number>
+conda run -n tsgen python scripts/smoke_test_experiments.py
+conda run -n tsgen python scripts/aggregate_results.py smoke_test/
 ```
 
-**Run backtest:**
+Run a full experiment:
+
 ```bash
-# Run rolling window backtest experiment
-tsgen-backtest --config experiments/my_backtest/config.yaml
+conda run -n tsgen tsgen --config experiments/0004_transformer_all_stocks/config.yaml --mode train_eval
 ```
 
-### Python API
+Run the full benchmark on Colab:
 
-```python
-from tsgen import train_model, evaluate_model
-from tsgen.models import create_model, UNet1D, DiffusionTransformer
-from tsgen.data.pipeline import load_prices, clean_data, process_prices
-from tsgen.data.processor import LogReturnProcessor
-from tsgen.tracking.base import ConsoleTracker
+1. Upload the `finbase` SQLite database to `My Drive/tsgen/timeseries.db`.
+2. Open [notebooks/colab_train.ipynb](notebooks/colab_train.ipynb) in Colab.
+3. Select a GPU runtime.
+4. Run cells top-to-bottom.
+5. Confirm `Eval Failures = 0` in the aggregate summary before interpreting metrics.
 
-# Load and process data using pipeline
-df = load_prices(['AAPL', 'MSFT'], '2020-01-01', '2024-01-01')
-df_clean = clean_data(df)
-
-processor = LogReturnProcessor()
-data_scaled = process_prices(df_clean, processor, fit=True)
-
-# Create model from config
-config = {
-    'model_type': 'unet',
-    'sequence_length': 256,
-    'timesteps': 500,
-    'base_channels': 32,
-    'tickers': ['AAPL', 'MSFT'],
-    'start_date': '2020-01-01',
-    'end_date': '2024-01-01',
-    # ... other config parameters
-}
-
-model = create_model(config)
-
-# Train model
-tracker = ConsoleTracker()
-train_model(config, tracker)
-
-# Evaluate model
-evaluate_model(config, tracker)
-```
+See [notebooks/README.md](notebooks/README.md) for the Colab workflow details.
 
 ## Configuration
 
-Experiments are configured via YAML files in `experiments/XXXX_name/config.yaml`. Key parameters:
+Experiments are YAML-driven. Current standard configs use the nested schema:
 
 ```yaml
-# Experiment identification
-experiment_name: 'my_experiment'
-experiment_number: 1
-description: 'Experiment description'
-output_dir: 'experiments/0001_my_experiment'
+experiment_name: transformer_all_stocks
+output_dir: experiments/0004_transformer_all_stocks
+model_type: transformer
 
-# Model configuration
-model_type: unet  # Options: unet, transformer, gbm, bootstrap, multivariate_lognormal, timevae
-base_channels: 128
-sequence_length: 64
-timesteps: 500
-learning_rate: 1e-3
+data:
+  column: adj_close
+  tickers: [AAPL, MSFT, GOOGL]
+  start_date: "2005-01-01"
+  end_date: "2024-12-31"
+  sequence_length: 64
+  train_test_split: 0.8
 
-# Data configuration
-tickers: [AAPL, MSFT, GOOG]
-start_date: '2020-01-01'
-end_date: '2024-01-01'
-column: adj_close  # Options: open, high, low, close, adj_close, volume
-train_test_split: 0.8  # Optional: temporal split ratio
+training:
+  epochs: 200
+  batch_size: 32
+  learning_rate: 0.001
+  timesteps: 500
 
-# Training configuration
-batch_size: 32
-epochs: 100
+evaluation:
+  num_samples: 500
+  discriminator_epochs: 20
+  tstr_epochs: 10
 
-# Experiment tracking
-tracker: file  # Options: file, console, mlflow, noop
+data_pipeline:
+  - load_prices:
+      column: adj_close
+  - clean_data:
+      strategy: mask
+  - split_temporal:
+      train_ratio: 0.8
+  - process_prices:
+      fit: true
+  - create_windows:
+      sequence_length: 64
+      stride: 1
+  - create_dataloader:
+      batch_size: 32
+      shuffle: true
 ```
 
-## Project Structure
+## CLI
 
+Train and evaluate:
+
+```bash
+tsgen --config path/to/config.yaml --mode train_eval
 ```
+
+Train only:
+
+```bash
+tsgen --config path/to/config.yaml --mode train
+```
+
+Evaluate saved artifacts:
+
+```bash
+tsgen --config path/to/config.yaml --mode eval
+```
+
+Override config fields:
+
+```bash
+tsgen --config path/to/config.yaml --mode train_eval \
+  --override training.epochs=3 \
+  --override evaluation.num_samples=50 \
+  --override output_dir=smoke_test/debug_run
+```
+
+## Project Layout
+
+```text
 tsgen/
-├── src/
-│   └── tsgen/              # Main package
-│       ├── cli/            # CLI entry points
-│       │   ├── main.py     # Main training/evaluation CLI
-│       │   └── experiments.py  # Experiment management CLI
-│       ├── models/         # Model architectures
-│       │   ├── unet.py     # UNet1D diffusion model
-│       │   ├── transformer.py  # Diffusion Transformer
-│       │   ├── timevae.py  # TimeVAE model
-│       │   ├── baselines.py    # GBM, Bootstrap, Multivariate LogNormal
-│       │   ├── diffusion.py    # Diffusion utilities (forward/reverse process)
-│       │   └── factory.py  # Model factory
-│       ├── data/           # Data pipeline (loading, cleaning, processing)
-│       │   ├── pipeline.py # Composable pipeline functions
-│       │   └── processor.py # LogReturnProcessor for price transformations
-│       ├── analysis/       # Evaluation metrics and tests
-│       │   ├── metrics.py  # Stylized facts metrics
-│       │   ├── discriminator.py  # Discriminator model
-│       │   ├── distribution_tests.py  # Statistical tests
-│       │   ├── tstr.py     # Train on Synthetic, Test on Real
-│       │   └── correlation_metrics.py  # Correlation structure analysis
-│       ├── tracking/       # Experiment tracking (MLflow, console, file)
-│       ├── experiments/    # Experiment management and backtesting
-│       ├── training/       # Training utilities
-│       └── utils/          # General utilities
-├── tests/                  # Test suite (18 test files)
-├── experiments/            # Experiment folders (created during training)
-│   └── .gitkeep            # Folder structure preserved, content gitignored
-└── pyproject.toml          # Package configuration
+├── configs/                 # Small example configs
+├── notebooks/               # Colab benchmark notebook
+├── scripts/                 # Config generation, smoke tests, aggregation
+├── src/tsgen/
+│   ├── analysis/            # Metrics and statistical tests
+│   ├── cli/                 # CLI entry points
+│   ├── config/              # Pydantic config schema
+│   ├── data/                # finbase loading, cleaning, processing, windows
+│   ├── evaluation/          # Evaluation pipeline and evaluators
+│   ├── experiments/         # Experiment management and backtesting
+│   ├── models/              # Model registry and architectures
+│   ├── tracking/            # File, console, MLflow tracking
+│   └── training/            # Trainer registry and training loops
+├── tests/                   # Unit and regression tests
+└── pyproject.toml
 ```
+
+`experiments/`, `smoke_test/`, generated artifacts, and local agent notes are
+ignored by git. Standard experiment configs are generated by
+`scripts/generate_standard_configs.py`.
 
 ## Development
 
-### Running Tests
+Run tests in the project conda environment:
 
 ```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest tests/ --cov=tsgen --cov-report=html
-
-# Run specific test file
-pytest tests/test_models.py -v
+conda run -n tsgen pytest tests/
 ```
 
-### Code Formatting
+Focused methodology checks:
 
 ```bash
-# Format code with black
-black src/ tests/
-
-# Check with flake8
-flake8 src/ tests/
+conda run -n tsgen pytest \
+  tests/test_load_prices_missing.py \
+  tests/test_evaluate_real_data.py \
+  tests/test_evaluation_pipeline_behavior.py \
+  tests/test_distribution_tests.py \
+  tests/test_mamba_parallel_scan.py -q
 ```
 
-## Tech Stack
+Before relying on benchmark outputs:
 
-- **Python**: 3.12+
-- **Deep Learning**: PyTorch 2.0+
-- **Data Processing**: Pandas, NumPy, Scikit-learn
-- **Visualization**: Matplotlib
-- **Experiment Tracking**: MLflow (optional)
-- **Database**: findata package (sibling project)
+```bash
+conda run -n tsgen python scripts/aggregate_results.py experiments/
+```
 
-## Related Projects
+Confirm:
 
-- **findata**: Historical market data management (sibling repository)
-  - Manages the time series database
-  - Must be installed before using tsgen
-  - tsgen has READ-ONLY access to the database
-  
+- all expected runs are present;
+- `Eval Failures` is zero;
+- the run manifest records the expected git SHA;
+- discriminator accuracy and AUC are interpreted as held-out metrics.
+
 ## License
 
-MIT License - See LICENSE file for details
-
+MIT License. See [LICENSE](LICENSE) for details.
