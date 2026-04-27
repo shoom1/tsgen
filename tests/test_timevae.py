@@ -116,19 +116,27 @@ def test_timevae_sample():
 
 
 def test_timevae_sample_sequence_length_validation():
-    """Test that TimeVAE validates sequence length during sampling."""
+    """TimeVAE's LSTM decoder is length-agnostic: any positive seq_len works.
+
+    (The old implementation raised ValueError for seq_len != sequence_length —
+    an artificial constraint fixed in item #8 of the 2026-04-16 model review.
+    Non-positive lengths still raise.)
+    """
     model = TimeVAE(features=2, sequence_length=64)
 
-    # Should work with default or matching length
     samples1 = model.generate(5)
     assert samples1.shape == (5, 64, 2)
 
     samples2 = model.generate(5, seq_len=64)
     assert samples2.shape == (5, 64, 2)
 
-    # Should raise error for different length
+    # Variable length is now supported
+    samples3 = model.generate(5, seq_len=128)
+    assert samples3.shape == (5, 128, 2)
+
+    # Non-positive lengths still raise
     with pytest.raises(ValueError):
-        model.generate(5, seq_len=128)
+        model.generate(5, seq_len=0)
 
 
 def test_timevae_encode_decode():
@@ -355,6 +363,119 @@ def test_timevae_gradient_flow():
 
     assert encoder_has_grad, "Encoder should have gradients"
     assert decoder_has_grad, "Decoder should have gradients"
+
+
+# ---------------------------------------------------------------------------
+# Fixes from item #8 of the 2026-04-16 model review:
+#   - BatchNorm1d inside the autoregressive loop was conceptually wrong;
+#     running stats accumulate across timesteps within a sequence. Replace
+#     with LayerNorm, which is position-invariant.
+#   - generate(seq_len=...) used to raise if seq_len differed from training
+#     sequence_length. The LSTM decoder is inherently length-agnostic, so
+#     generation and decoding should honor any positive length.
+# ---------------------------------------------------------------------------
+
+
+class TestNormalization:
+    def test_decoder_uses_layernorm_not_batchnorm(self):
+        """LayerNorm is position-invariant and works in AR loops; BatchNorm is not."""
+        decoder = TimeVAEDecoder(
+            latent_dim=4, hidden_dim=16, features=2,
+            sequence_length=8, num_layers=1,
+        )
+        # Must have a LayerNorm over hidden_dim for per-step normalization.
+        has_layer_norm = any(
+            isinstance(m, torch.nn.LayerNorm)
+            for m in decoder.modules()
+        )
+        assert has_layer_norm, "TimeVAEDecoder must use LayerNorm for per-step normalization"
+
+        # And must NOT rely on BatchNorm1d in the recurrent path.
+        has_batch_norm = any(
+            isinstance(m, torch.nn.BatchNorm1d)
+            for m in decoder.modules()
+        )
+        assert not has_batch_norm, (
+            "TimeVAEDecoder must not use BatchNorm1d inside the autoregressive "
+            "loop — running stats accumulate across timesteps within a sequence, "
+            "which is incorrect."
+        )
+
+    def test_decoder_runs_in_eval_mode_with_batch_one(self):
+        """With old BatchNorm, this would sometimes crash or produce nonsense
+        stats at batch_size=1. LayerNorm must handle batch=1 gracefully."""
+        decoder = TimeVAEDecoder(
+            latent_dim=4, hidden_dim=16, features=2,
+            sequence_length=8, num_layers=1,
+        )
+        decoder.eval()
+        z = torch.randn(1, 4)
+        with torch.no_grad():
+            out = decoder(z)
+        assert out.shape == (1, 8, 2)
+        assert torch.isfinite(out).all()
+
+    def test_decoder_training_mode_batch_one(self):
+        """Same, but in training mode — LayerNorm has no running stats, so
+        batch_size=1 must work without the old BatchNorm guard."""
+        decoder = TimeVAEDecoder(
+            latent_dim=4, hidden_dim=16, features=2,
+            sequence_length=8, num_layers=1,
+        )
+        decoder.train()
+        z = torch.randn(1, 4)
+        out = decoder(z)
+        assert out.shape == (1, 8, 2)
+        assert torch.isfinite(out).all()
+
+
+class TestVariableSeqLen:
+    def test_decoder_accepts_length_argument(self):
+        """Decoder should unroll to any requested length, not just its training length."""
+        decoder = TimeVAEDecoder(
+            latent_dim=4, hidden_dim=16, features=2,
+            sequence_length=8, num_layers=1,
+        )
+        decoder.eval()
+        z = torch.randn(3, 4)
+        with torch.no_grad():
+            for L in [1, 3, 8, 20, 100]:
+                out = decoder(z, length=L)
+                assert out.shape == (3, L, 2), f"Failed for L={L}"
+
+    def test_generate_respects_seq_len(self):
+        """TimeVAE.generate(seq_len=X) must work for any positive X, not only
+        the training sequence_length (the old implementation raised ValueError)."""
+        model = TimeVAE(features=2, sequence_length=8, hidden_dim=16, latent_dim=4)
+        model.eval()
+        for L in [4, 8, 16, 32]:
+            out = model.generate(n_samples=3, seq_len=L, device='cpu')
+            assert out.shape == (3, L, 2), f"Failed for L={L}"
+
+    def test_generate_defaults_to_training_length(self):
+        """When seq_len is not specified, use the training sequence_length."""
+        model = TimeVAE(features=2, sequence_length=10, hidden_dim=16, latent_dim=4)
+        model.eval()
+        out = model.generate(n_samples=2, device='cpu')
+        assert out.shape == (2, 10, 2)
+
+    def test_decode_variable_length(self):
+        """model.decode(z) can take an optional length."""
+        model = TimeVAE(features=2, sequence_length=8, hidden_dim=16, latent_dim=4)
+        model.eval()
+        z = torch.randn(2, 4)
+        with torch.no_grad():
+            out = model.decode(z, length=20)
+        assert out.shape == (2, 20, 2)
+
+    def test_forward_still_matches_input_length(self):
+        """Training path: reconstruction length must match input length so
+        the reconstruction loss is well-defined."""
+        model = TimeVAE(features=2, sequence_length=8, hidden_dim=16, latent_dim=4)
+        for L in [5, 8, 16]:
+            x = torch.randn(3, L, 2)
+            recon, mu, logvar = model(x)
+            assert recon.shape == x.shape
 
 
 if __name__ == "__main__":

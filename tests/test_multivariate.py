@@ -1,5 +1,5 @@
 """
-Tests for MultivariateGBM model with full covariance.
+Tests for MultivariateGaussian model with full covariance.
 
 This model captures cross-asset correlations via a full covariance matrix
 and Cholesky decomposition when full_covariance=True (default).
@@ -8,7 +8,7 @@ and Cholesky decomposition when full_covariance=True (default).
 import pytest
 import torch
 import numpy as np
-from tsgen.models.baselines import MultivariateGBM
+from tsgen.models.baselines import MultivariateGaussian
 from tsgen.data.pipeline import load_prices, clean_data, process_prices, create_windows, create_dataloader
 from tsgen.data.processor import LogReturnProcessor
 
@@ -32,8 +32,8 @@ def synthetic_dataloader():
 
 
 def test_multivariate_initialization():
-    """Test MultivariateGBM model can be initialized with full covariance."""
-    model = MultivariateGBM(features=3)  # full_covariance=True by default
+    """Test MultivariateGaussian model can be initialized with full covariance."""
+    model = MultivariateGaussian(features=3)  # full_covariance=True by default
     assert model is not None
     assert model.features == 3
     assert model.full_covariance == True
@@ -47,8 +47,8 @@ def test_multivariate_initialization():
 
 
 def test_multivariate_fit(synthetic_dataloader):
-    """Test MultivariateGBM model fitting with full covariance."""
-    model = MultivariateGBM(features=3)
+    """Test MultivariateGaussian model fitting with full covariance."""
+    model = MultivariateGaussian(features=3)
 
     # Fit model
     model.fit(synthetic_dataloader)
@@ -74,7 +74,7 @@ def test_multivariate_fit(synthetic_dataloader):
 
 def test_multivariate_sample(synthetic_dataloader):
     """Test MultivariateLogNormal model sampling."""
-    model = MultivariateGBM(features=3)
+    model = MultivariateGaussian(features=3)
     model.fit(synthetic_dataloader)
 
     # Generate samples
@@ -91,7 +91,7 @@ def test_multivariate_sample(synthetic_dataloader):
 
 def test_multivariate_correlation_structure():
     """Test that multivariate model captures correlation structure."""
-    model = MultivariateGBM(features=2)
+    model = MultivariateGaussian(features=2)
 
     # Create correlated synthetic data
     # Asset 1 and Asset 2 with correlation 0.7
@@ -155,11 +155,11 @@ def test_multivariate_vs_gbm_correlation():
     dataset = TensorDataset(X)
     dataloader = DataLoader(dataset, batch_size=32)
 
-    # Fit both modes of MultivariateGBM
-    multivariate = MultivariateGBM(features=2, full_covariance=True)
+    # Fit both modes of MultivariateGaussian
+    multivariate = MultivariateGaussian(features=2, full_covariance=True)
     multivariate.fit(dataloader)
 
-    independent = MultivariateGBM(features=2, full_covariance=False)
+    independent = MultivariateGaussian(features=2, full_covariance=False)
     independent.fit(dataloader)
 
     # Generate samples
@@ -180,8 +180,8 @@ def test_multivariate_vs_gbm_correlation():
 
 
 def test_multivariate_reproducibility():
-    """Test MultivariateGBM sampling is reproducible with same seed."""
-    model = MultivariateGBM(features=3)
+    """Test MultivariateGaussian sampling is reproducible with same seed."""
+    model = MultivariateGaussian(features=3)
 
     # Set parameters manually
     model.mean = torch.tensor([0.001, 0.002, 0.003])
@@ -206,7 +206,7 @@ def test_multivariate_save_load():
     import os
 
     # Create model
-    model = MultivariateGBM(features=2)
+    model = MultivariateGaussian(features=2)
     model.mean = torch.tensor([0.01, 0.02])
     model.cholesky_L = torch.tensor([[1.0, 0.0],
                                      [0.7, 0.7]])
@@ -238,10 +238,10 @@ def test_multivariate_save_load():
 
 
 def test_multivariate_is_statistical_model():
-    """Test that MultivariateGBM is a StatisticalModel (not DiffusionModel)."""
+    """Test that MultivariateGaussian is a StatisticalModel (not DiffusionModel)."""
     from tsgen.models.base_model import StatisticalModel, DiffusionModel
 
-    model = MultivariateGBM(features=2)
+    model = MultivariateGaussian(features=2)
 
     # Should be a StatisticalModel
     assert isinstance(model, StatisticalModel)
@@ -258,7 +258,7 @@ def test_multivariate_is_statistical_model():
 
 def test_multivariate_cholesky_regularization():
     """Test that regularization prevents singular matrix issues."""
-    model = MultivariateGBM(features=2)
+    model = MultivariateGaussian(features=2)
 
     # Create nearly singular data (all same value)
     X = torch.ones(100, 64, 2) * 0.5
@@ -279,7 +279,7 @@ def test_multivariate_cholesky_regularization():
 
 def test_multivariate_cov_to_corr():
     """Test covariance to correlation conversion."""
-    model = MultivariateGBM(features=2)
+    model = MultivariateGaussian(features=2)
 
     # Create known covariance matrix
     cov = torch.tensor([[4.0, 2.0],

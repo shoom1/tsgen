@@ -249,7 +249,7 @@ class StatisticalModel(BaseGenerativeModel):
     statistical parameters from data using the fit() method and generate
     samples using the sample() method.
 
-    Subclasses: MultivariateGBM, BootstrapGenerativeModel
+    Subclasses: MultivariateGaussian, BootstrapGenerativeModel
     """
 
     @abstractmethod

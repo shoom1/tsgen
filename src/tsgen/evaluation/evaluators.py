@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
 from tsgen.analysis.metrics import (
     calculate_stylized_facts,
@@ -97,14 +99,17 @@ class StylizedFactsEvaluator(MetricEvaluator):
         # Cache raw results for downstream plotting (avoids recomputation)
         self.last_raw_results = sf_metrics
 
+        # Use nanmean so per-feature NaN (e.g. from a rare zero-variance column
+        # produced by some baselines on staggered-IPO data) doesn't poison the
+        # whole summary metric.
         return {
-            "kurtosis_diff_mean": float(np.mean(sf_metrics['kurtosis_diff'])),
-            "skew_diff_mean": float(np.mean(sf_metrics['skew_diff'])),
+            "kurtosis_diff_mean": float(np.nanmean(sf_metrics['kurtosis_diff'])),
+            "skew_diff_mean": float(np.nanmean(sf_metrics['skew_diff'])),
             "acf_ret_diff_mse": float(sf_metrics['acf_ret_diff']),
             "acf_sq_ret_diff_mse": float(sf_metrics['acf_sq_ret_diff']),
             "corr_matrix_norm_diff": float(sf_metrics['corr_matrix_diff_norm']),
-            "var_diff_mean": float(np.mean(sf_metrics['var_diff'])),
-            "es_diff_mean": float(np.mean(sf_metrics['es_diff'])),
+            "var_diff_mean": float(np.nanmean(sf_metrics['var_diff'])),
+            "es_diff_mean": float(np.nanmean(sf_metrics['es_diff'])),
         }
 
 
@@ -189,6 +194,11 @@ class DistributionTestEvaluator(MetricEvaluator):
                 metrics[f"dist_{short_name}_stat"] = float(res['statistic'])
             if 'p_value' in res:
                 metrics[f"dist_{short_name}_p"] = float(res['p_value'])
+            for key, value in res.items():
+                if key in {'statistic', 'p_value', 'error', 'sample_method'}:
+                    continue
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    metrics[f"dist_{short_name}_{key}"] = float(value)
 
         return metrics
 
@@ -201,7 +211,13 @@ class DiscriminatorEvaluator(MetricEvaluator):
     Target accuracy is 0.5 (can't distinguish = perfect generation).
     """
 
-    def __init__(self, epochs: int = 20, hidden_dim: int = 64):
+    def __init__(
+        self,
+        epochs: int = 20,
+        hidden_dim: int = 64,
+        test_size: float = 0.3,
+        random_state: int = 42,
+    ):
         """
         Initialize discriminator evaluator.
 
@@ -211,6 +227,8 @@ class DiscriminatorEvaluator(MetricEvaluator):
         """
         self.epochs = epochs
         self.hidden_dim = hidden_dim
+        self.test_size = test_size
+        self.random_state = random_state
 
     @property
     def name(self) -> str:
@@ -224,46 +242,84 @@ class DiscriminatorEvaluator(MetricEvaluator):
         **kwargs
     ) -> Dict[str, float]:
         """Train discriminator and compute accuracy."""
-        accuracy = self._train_discriminator(real_data, synthetic_data, device)
-        return {"discriminator_accuracy": float(accuracy)}
+        scores = self._train_discriminator(real_data, synthetic_data, device)
+        return {
+            "discriminator_accuracy": float(scores["test_accuracy"]),
+            "discriminator_auc": float(scores["test_auc"]),
+            "discriminator_train_accuracy": float(scores["train_accuracy"]),
+        }
 
     def _train_discriminator(
         self,
         real_data: np.ndarray,
         fake_data: np.ndarray,
         device: str
-    ) -> float:
-        """Train LSTM discriminator and return accuracy."""
+    ) -> Dict[str, float]:
+        """Train LSTM discriminator and return held-out scores."""
         real_labels = torch.ones(len(real_data), 1)
         fake_labels = torch.zeros(len(fake_data), 1)
         X = torch.cat([torch.FloatTensor(real_data), torch.FloatTensor(fake_data)])
         y = torch.cat([real_labels, fake_labels])
 
-        dataset = torch.utils.data.TensorDataset(X, y)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+        if len(real_data) < 2 or len(fake_data) < 2:
+            raise ValueError("Discriminator evaluation needs at least 2 real and 2 synthetic samples.")
 
-        model = _Discriminator(input_dim=real_data.shape[2], hidden_dim=self.hidden_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-        criterion = nn.BCELoss()
+        indices = np.arange(len(X))
+        y_np = y.numpy().ravel()
+        train_idx, test_idx = train_test_split(
+            indices,
+            test_size=self.test_size,
+            random_state=self.random_state,
+            stratify=y_np,
+        )
 
-        for _ in range(self.epochs):
-            model.train()
-            for batch_x, batch_y in loader:
-                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-                optimizer.zero_grad()
-                preds = model(batch_x)
-                loss = criterion(preds, batch_y)
-                loss.backward()
-                optimizer.step()
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_test, y_test = X[test_idx], y[test_idx]
 
-        # Evaluate
-        model.eval()
-        with torch.no_grad():
-            all_preds = model(X.to(device))
-            predicted_labels = (all_preds > 0.5).float().cpu()
-            acc = (predicted_labels == y).float().mean().item()
+        dataset = torch.utils.data.TensorDataset(X_train, y_train)
+        generator = torch.Generator()
+        generator.manual_seed(self.random_state)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=32,
+            shuffle=True,
+            generator=generator,
+        )
 
-        return acc
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(self.random_state)
+            model = _Discriminator(input_dim=real_data.shape[2], hidden_dim=self.hidden_dim).to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+            criterion = nn.BCELoss()
+
+            for _ in range(self.epochs):
+                model.train()
+                for batch_x, batch_y in loader:
+                    batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+                    optimizer.zero_grad()
+                    preds = model(batch_x)
+                    loss = criterion(preds, batch_y)
+                    loss.backward()
+                    optimizer.step()
+
+            # Evaluate on both train and held-out sets. The published
+            # discriminator_accuracy is the held-out score.
+            model.eval()
+            with torch.no_grad():
+                train_preds = model(X_train.to(device)).cpu()
+                test_preds = model(X_test.to(device)).cpu()
+
+        train_labels = (train_preds > 0.5).float()
+        test_labels = (test_preds > 0.5).float()
+        train_acc = (train_labels == y_train).float().mean().item()
+        test_acc = (test_labels == y_test).float().mean().item()
+        test_auc = roc_auc_score(y_test.numpy().ravel(), test_preds.numpy().ravel())
+
+        return {
+            "train_accuracy": train_acc,
+            "test_accuracy": test_acc,
+            "test_auc": test_auc,
+        }
 
 
 class _Discriminator(nn.Module):

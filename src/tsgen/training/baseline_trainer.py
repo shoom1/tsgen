@@ -12,7 +12,7 @@ from tsgen.training.base import BaseTrainer
 from tsgen.training.registry import TrainerRegistry
 
 
-@TrainerRegistry.register('gbm', 'bootstrap', 'multivariate_lognormal', 'multivariate_gbm')
+@TrainerRegistry.register('multivariate_gaussian', 'bootstrap', 'ccc_garch')
 class BaselineTrainer(BaseTrainer):
     """
     Trainer for baseline models that use .fit() method.
