@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tsgen"
-version = "0.4.0"
+version = "0.4.1"
 description = "Synthetic Financial Time Series Generation using Diffusion Models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -62,10 +62,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/tsgen"
-Documentation = "https://github.com/yourusername/tsgen#readme"
-Repository = "https://github.com/yourusername/tsgen"
-Issues = "https://github.com/yourusername/tsgen/issues"
+Homepage = "https://github.com/shoom1/tsgen"
+Documentation = "https://github.com/shoom1/tsgen#readme"
+Repository = "https://github.com/shoom1/tsgen"
+Issues = "https://github.com/shoom1/tsgen/issues"
 
 [project.scripts]
 # Main training and evaluation command
